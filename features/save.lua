@@ -22,7 +22,7 @@ local saveState = {
 }
 
 -- ============================================================
--- FS HELPERS
+-- FS
 -- ============================================================
 local function hasFs()
 	return writefile and readfile and isfile
@@ -30,8 +30,8 @@ end
 
 local function fileExists(name)
 	if isfile then
-		local ok, result = pcall(isfile, name)
-		return ok and result
+		local ok, r = pcall(isfile, name)
+		return ok and r
 	end
 	return false
 end
@@ -54,8 +54,8 @@ local function collectValues()
 	local data = {}
 	for key, sub in pairs(saveState.subscriptions) do
 		if sub and sub.get then
-			local ok, value = pcall(sub.get)
-			if ok then data[key] = value end
+			local ok, v = pcall(sub.get)
+			if ok then data[key] = v end
 		end
 	end
 	return data
@@ -63,10 +63,9 @@ end
 
 function Save.save()
 	if not hasFs() then
-		warn("[SAVE] Executor не поддерживает writefile")
+		warn("[SAVE] Нет writefile")
 		return false
 	end
-
 	local data = collectValues()
 	data._version = 1
 	data._savedAt = os.time()
@@ -74,21 +73,15 @@ function Save.save()
 	local ok, encoded = pcall(function()
 		return HttpService:JSONEncode(data)
 	end)
-	if not ok then
-		warn("[SAVE] Ошибка кодирования: " .. tostring(encoded))
-		return false
-	end
+	if not ok then return false end
 
-	local writeOk, err = pcall(function()
+	local writeOk = pcall(function()
 		writefile(CONFIG_FILE, encoded)
 	end)
-	if not writeOk then
-		warn("[SAVE] Ошибка записи: " .. tostring(err))
-		return false
-	end
+	if not writeOk then return false end
 
 	saveState.lastSave = tick()
-	print("[SAVE] Сохранено: " .. CONFIG_FILE .. " (" .. tostring(#encoded) .. " байт)")
+	print("[SAVE] Сохранено: " .. tostring(#encoded) .. " байт")
 	return true
 end
 
@@ -96,74 +89,45 @@ end
 -- LOAD
 -- ============================================================
 function Save.load()
-	if not hasFs() then
-		warn("[SAVE] Executor не поддерживает readfile")
-		return false
-	end
-
+	if not hasFs() then return false end
 	if not fileExists(CONFIG_FILE) then
-		print("[SAVE] Файл " .. CONFIG_FILE .. " не найден — используется дефолт")
+		print("[SAVE] Файл не найден")
 		return false
 	end
 
-	local readOk, content = pcall(function()
-		return readfile(CONFIG_FILE)
-	end)
-	if not readOk or not content then
-		warn("[SAVE] Ошибка чтения файла")
-		return false
-	end
+	local readOk, content = pcall(function() return readfile(CONFIG_FILE) end)
+	if not readOk or not content then return false end
 
 	local decodeOk, data = pcall(function()
 		return HttpService:JSONDecode(content)
 	end)
-	if not decodeOk or type(data) ~= "table" then
-		warn("[SAVE] Ошибка декодирования JSON")
-		return false
-	end
+	if not decodeOk or type(data) ~= "table" then return false end
 
-	local applied, skipped = 0, 0
+	local applied = 0
 	for key, sub in pairs(saveState.subscriptions) do
 		if sub and sub.set and data[key] ~= nil then
 			local ok = pcall(sub.set, data[key])
-			if ok then
-				applied = applied + 1
-			else
-				skipped = skipped + 1
-			end
+			if ok then applied = applied + 1 end
 		end
 	end
 
 	saveState.loaded = true
-	print("[SAVE] Загружено: " .. applied .. " применено, " .. skipped .. " пропущено")
+	print("[SAVE] Загружено: " .. applied)
 	return true
 end
 
--- ============================================================
--- RESET
--- ============================================================
 function Save.reset()
 	if hasFs() and fileExists(CONFIG_FILE) then
-		local ok = pcall(function()
-			writefile(CONFIG_FILE, "{}")
-		end)
-		if ok then
-			print("[SAVE] Файл сброшен")
-		end
+		pcall(function() writefile(CONFIG_FILE, "{}") end)
 	end
 end
 
 function Save.deleteFile()
-	if hasFs() and fileExists(CONFIG_FILE) then
-		pcall(function()
-			writefile(CONFIG_FILE, "{}")
-		end)
-		print("[SAVE] Файл удалён")
-	end
+	Save.reset()
 end
 
 -- ============================================================
--- AUTO-SAVE LOOP
+-- AUTO-SAVE
 -- ============================================================
 local function startAutoSave()
 	if not hasFs() then return end
@@ -187,66 +151,90 @@ local function startAutoSave()
 end
 
 -- ============================================================
--- UI (внутри page 3, ГАРАНТИРОВАННО)
+-- UI — ЖЁСТКО ИЩЕМ PAGE 3 В MENU
 -- ============================================================
-local function buildUI()
-	-- берём page 3 из Hub
-	local page3 = Hub.Page and Hub.Page(3)
-
-	if not page3 then
-		warn("[save] Hub.Page(3) = nil")
-		return
+local function findRealPage3()
+	-- 1. Hub.Page(3)
+	local p = Hub.Page and Hub.Page(3)
+	if p and Hub.MenuGui and p:IsDescendantOf(Hub.MenuGui) then
+		return p
 	end
 
-	-- проверяем что page3 внутри MenuUI
-	if Hub.MenuGui and not page3:IsDescendantOf(Hub.MenuGui) then
-		warn("[save] page3 не в MenuUI — ищу menu frame")
+	-- 2. ищем MenuUI
+	local pg = player:FindFirstChild("PlayerGui")
+	if not pg then return nil end
+	local gui = pg:FindFirstChild("MenuUI")
+	if not gui then
+		warn("[save] MenuUI не найден в PlayerGui")
+		return nil
+	end
 
-		for _, obj in ipairs(Hub.MenuGui:GetChildren()) do
-			if obj:IsA("Frame") then
-				local p3 = obj:FindFirstChild("Page3")
-				if p3 then
-					page3 = p3
-					print("[save] Нашёл Page3 в menu frame:", page3)
-					break
-				end
+	-- 3. ищем menu frame (в нём есть Page1)
+	local menu
+	for _, obj in ipairs(gui:GetChildren()) do
+		if obj:IsA("Frame") then
+			if obj:FindFirstChild("Page1") or obj:FindFirstChild("Page3") then
+				menu = obj
+				break
 			end
 		end
 	end
 
-	page = page3
+	if not menu then
+		warn("[save] menu frame не найден")
+		return nil
+	end
 
-	print("[save] Page3:", page)
-	print("[save] parent:", page.Parent)
-	print("[save] в MenuUI:", Hub.MenuGui and page:IsDescendantOf(Hub.MenuGui))
+	-- 4. ищем Page3 внутри menu
+	local page3 = menu:FindFirstChild("Page3")
+	if not page3 then
+		warn("[save] Page3 не найден внутри menu — создаю")
+		page3 = Instance.new("Frame")
+		page3.Name = "Page3"
+		page3.Size = UDim2.new(1, 0, 1, -40)
+		page3.BackgroundTransparency = 1
+		page3.Visible = false
+		page3.Parent = menu
+	end
 
-	-- ============ РАЗДЕЛИТЕЛЬ ============
+	return page3
+end
+
+local function buildUI()
+	page = findRealPage3()
+
+	if not page then
+		warn("[save] НЕ НАЙДЕН PAGE 3 — UI не создан")
+		return
+	end
+
+	print("[save] Page3 =", page)
+	print("[save] Parent =", page.Parent)
+	print("[save] в MenuUI =", Hub.MenuGui and page:IsDescendantOf(Hub.MenuGui))
+
+	-- разделитель
 	local divider = Instance.new("Frame")
-	divider.Name = "SaveDivider"
 	divider.Size = UDim2.new(1, -20, 0, 1)
 	divider.Position = UDim2.new(0, 10, 0, 145)
 	divider.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
 	divider.BorderSizePixel = 0
 	divider.Parent = page
 
-	-- ============ СТАТУС ============
 	local statusText = hasFs() and "Ready" or "NO FS"
 	local statusColor = hasFs() and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
 
-	local statusLabel = Elements.label(page,
-		"SAVE — " .. statusText, 152,
+	-- статус
+	local statusLabel = Elements.label(page, "SAVE — " .. statusText, 152,
 		{ color = statusColor, size = 9, font = Enum.Font.GothamBold })
 
-	-- ============ AUTO SAVE ============
+	-- auto save
 	Elements.label(page, "Auto Save", 170)
 	Hub.Toggles.autoSave = Elements.switch(page, 168, function(on)
 		saveState.enabled = on
-		print("[SAVE] Auto-save " .. (on and "ON" or "OFF"))
 	end)
 
-	-- ============ КНОПКИ ============
+	-- кнопки
 	local btnHolder = Instance.new("Frame")
-	btnHolder.Name = "SaveButtons"
 	btnHolder.Size = UDim2.new(1, -16, 0, 20)
 	btnHolder.Position = UDim2.new(0, 8, 0, 188)
 	btnHolder.BackgroundTransparency = 1
@@ -324,38 +312,29 @@ function Save.init(hub)
 	task.defer(function()
 		task.wait(3)
 
-		local function reg(key, toggleObj)
-			if toggleObj and toggleObj.get and toggleObj.set then
-				Save.register(key, toggleObj.get, toggleObj.set)
+		local function reg(key, t)
+			if t and t.get and t.set then
+				Save.register(key, t.get, t.set)
 			end
 		end
 
-		-- ESP
 		reg("esp.players",   Hub.Toggles.espPlayers)
 		reg("esp.tools",     Hub.Toggles.espTools)
 		reg("esp.prompts",   Hub.Toggles.espPrompts)
 		reg("esp.monsters",  Hub.Toggles.espMonsters)
 		reg("esp.instant",   Hub.Toggles.instantPrompt)
-
-		-- Movement
 		reg("movement.speed",      Hub.Toggles.speed)
 		reg("movement.fov",        Hub.Toggles.fov)
 		reg("movement.fullbright", Hub.Toggles.fullbright)
-
-		-- Bypass
 		reg("bypass.anticheat",    Hub.Toggles.bypass)
 		reg("bypass.doorReach",    Hub.Toggles.doorReach)
-
-		-- Notify
 		reg("notify.entity",       Hub.Toggles.entityNotify)
-
-		-- Misc
 		reg("misc.antiLag",        Hub.Toggles.antiLag)
 		reg("misc.infiniteItems",  Hub.Toggles.infiniteItems)
 
-		local count = 0
-		for _ in pairs(saveState.subscriptions) do count = count + 1 end
-		print("[SAVE] Зарегистрировано: " .. tostring(count) .. " настроек")
+		local c = 0
+		for _ in pairs(saveState.subscriptions) do c = c + 1 end
+		print("[SAVE] Зарегистрировано: " .. c)
 
 		task.wait(0.5)
 		Save.load()
@@ -363,9 +342,7 @@ function Save.init(hub)
 	end)
 
 	function Save.cleanup()
-		if saveState.enabled then
-			pcall(Save.save)
-		end
+		if saveState.enabled then pcall(Save.save) end
 		saveState.enabled = false
 		saveState.subscriptions = {}
 		for _, conn in ipairs(connections) do
