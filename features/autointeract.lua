@@ -45,6 +45,7 @@ local IGNORE_PREFIXES = {
 	"Double_Bed",
 	"HidePrompt",         -- само hiding
 	"Hide",
+	"Painting",
 }
 
 -- Игнор по имени самого prompt'а (точное совпадение)
