@@ -1,8 +1,8 @@
-local BASE = "https://raw.githubusercontent.com/ТВОЙ_НИК/doors-hub-modular/main/"
+local BASE = "https://raw.githubusercontent.com/artemkf161rus-max/doors-hub-modular/refs/heads/main/"
 
 local function load(path)
 	local ok, result = pcall(function()
-		return loadstring(game:HttpGet(BASE .. path .. "?t=" .. tick()))()
+		return loadstring(game:HttpGet(BASE .. path))()
 	end)
 	if not ok then
 		warn("[HUB] Ошибка загрузки " .. path .. ": " .. tostring(result))
