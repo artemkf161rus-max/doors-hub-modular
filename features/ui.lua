@@ -1,3 +1,6 @@
+-- ============================================================
+-- ============  MODULE: UI  ==================================
+-- ============================================================
 local UI = {}
 
 function UI.init(Hub)
@@ -24,7 +27,7 @@ function UI.init(Hub)
 	}
 	local FONT_BOLD = Enum.Font.GothamBold
 
-	-- ==================== ROOT ====================
+	-- ==================== ROOT GUI ====================
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "MenuUI"
 	gui.ResetOnSpawn = false
@@ -89,7 +92,7 @@ function UI.init(Hub)
 	end
 
 	-- ============================================================
-	-- ============  ELEMENTS (до создания меню)  =================
+	-- ============  ELEMENTS  ====================================
 	-- ============================================================
 	local Elements = {}
 
@@ -217,10 +220,9 @@ function UI.init(Hub)
 	end
 
 	function Elements.button(parent, text, order, color, width, callback)
-		-- защита от дублей
 		for _, child in ipairs(parent:GetChildren()) do
 			if child:IsA("TextButton") and child.Text == text then
-				warn("[Elements] Кнопка '" .. text .. "' уже есть на этой странице — возвращаю существующую")
+				warn("[Elements] Кнопка '" .. text .. "' уже есть")
 				return child
 			end
 		end
@@ -262,7 +264,7 @@ function UI.init(Hub)
 	local unloadBtn = Elements.button(holder, "Выгрузить", 3, COLORS.Danger, 100)
 
 	-- ============================================================
-	-- ============  MENU  ========================================
+	-- ============  MENU FRAME  ==================================
 	-- ============================================================
 	local menu = Instance.new("Frame")
 	menu.Size = UDim2.new(0, 280, 0, 300)
@@ -276,12 +278,13 @@ function UI.init(Hub)
 	stroke(menu, COLORS.Accent, 2)
 
 	-- ============================================================
-	-- ============  PAGES (СНАЧАЛА СОЗДАЁМ, ПОТОМ Hub.Page)  =====
+	-- ============  PAGES (СНАЧАЛА!)  ============================
 	-- ============================================================
 	local pages = {}
 	local pagesCount = 3
 	for i = 1, pagesCount do
 		local p = Instance.new("Frame")
+		p.Name = "Page" .. i
 		p.Size = UDim2.new(1, 0, 1, -40)
 		p.BackgroundTransparency = 1
 		p.Visible = false
@@ -347,7 +350,7 @@ function UI.init(Hub)
 	-- ============================================================
 	Hub.Page = function(n) return pages[n] end
 	Hub.Elements = Elements
-	Hub.Objects.Elements = Elements  -- ДУБЛИРУЕМ для модулей
+	Hub.Objects.Elements = Elements
 	Hub.MenuGui = gui
 	Hub.MenuFrame = menu
 	Hub.Pages = pages
@@ -379,7 +382,7 @@ function UI.init(Hub)
 	end)
 
 	-- ============================================================
-	-- ============  ЗАГРУЗКА МОДУЛЕЙ  ============================
+	-- ============  ЗАГРУЗКА МОДУЛЕЙ (В САМОМ КОНЦЕ)  ============
 	-- ============================================================
 	local function loadModule(path)
 		local url = BASE .. path .. "?t=" .. tostring(os.time())
@@ -406,6 +409,9 @@ function UI.init(Hub)
 	print("[UI] Hub.Page:", Hub.Page)
 	print("[UI] Hub.Elements:", Hub.Elements)
 	print("[UI] Hub.Objects.Elements:", Hub.Objects.Elements)
+	print("[UI] Page 1:", Hub.Page(1))
+	print("[UI] Page 2:", Hub.Page(2))
+	print("[UI] Page 3:", Hub.Page(3))
 
 	for _, path in ipairs(modules) do
 		print("[UI] Загружаю: " .. path)
@@ -415,12 +421,10 @@ function UI.init(Hub)
 			warn("[UI] ❌ " .. path .. " → mod = nil")
 			continue
 		end
-
 		if type(mod) ~= "table" then
 			warn("[UI] ❌ " .. path .. " → mod не таблица (" .. type(mod) .. ")")
 			continue
 		end
-
 		if not mod.init then
 			warn("[UI] ❌ " .. path .. " → нет .init")
 			continue
@@ -433,9 +437,14 @@ function UI.init(Hub)
 		if ok then
 			print("[UI] ✅ " .. name .. " загружен")
 		else
-			warn("[UI] ❌ " .. name .. " упал:")
-			warn("[UI]   " .. tostring(err))
+			warn("[UI] ❌ " .. name .. " упал: " .. tostring(err))
 		end
+	end
+
+	print("[UI] ========== ПОСЛЕ ЗАГРУЗКИ ==========")
+	print("[UI] Page 2 детей:", #Hub.Page(2):GetChildren())
+	for _, c in ipairs(Hub.Page(2):GetChildren()) do
+		print("[UI]   -", c.ClassName, "|", c.Name, "| Visible:", c.Visible)
 	end
 	print("[UI] =========================================")
 
@@ -443,25 +452,18 @@ function UI.init(Hub)
 	-- ============  UNLOAD  ======================================
 	-- ============================================================
 	unloadBtn.MouseButton1Click:Connect(function()
-		-- cleanup у всех модулей
 		for name, mod in pairs(Hub.Modules) do
 			if type(mod) == "table" and mod.cleanup then
 				pcall(mod.cleanup)
 			end
 		end
-
-		-- выключаем все тоглы
 		for _, sw in pairs(Hub.Toggles) do
 			pcall(function() sw.set(false) end)
 		end
-
-		-- отключаем общие коннекты
 		for _, c in pairs(Hub.Connections) do
 			pcall(function() c:Disconnect() end)
 		end
 		Hub.Connections = {}
-
-		-- удаляем GUI
 		if gui and gui.Parent then gui:Destroy() end
 		print("[HUB] Unloaded")
 	end)
