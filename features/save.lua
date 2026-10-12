@@ -1,5 +1,5 @@
 -- ============================================================
--- ============  MODULE: SAVE CONFIG  =========================
+-- ============  MODULE: SAVE CONFIG (COMPACT)  ===============
 -- ============================================================
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
@@ -37,13 +37,10 @@ local function fileExists(name)
 end
 
 -- ============================================================
--- REGISTER / UNREGISTER
+-- REGISTER
 -- ============================================================
 function Save.register(key, getter, setter)
-	saveState.subscriptions[key] = {
-		get = getter,
-		set = setter,
-	}
+	saveState.subscriptions[key] = { get = getter, set = setter }
 end
 
 function Save.unregister(key)
@@ -51,16 +48,14 @@ function Save.unregister(key)
 end
 
 -- ============================================================
--- SAVE
+-- SAVE / LOAD
 -- ============================================================
 local function collectValues()
 	local data = {}
 	for key, sub in pairs(saveState.subscriptions) do
 		if sub and sub.get then
 			local ok, value = pcall(sub.get)
-			if ok then
-				data[key] = value
-			end
+			if ok then data[key] = value end
 		end
 	end
 	return data
@@ -79,96 +74,56 @@ function Save.save()
 	local ok, encoded = pcall(function()
 		return HttpService:JSONEncode(data)
 	end)
+	if not ok then return false end
 
-	if not ok then
-		warn("[SAVE] Ошибка кодирования: " .. tostring(encoded))
-		return false
-	end
-
-	local writeOk, err = pcall(function()
+	local writeOk = pcall(function()
 		writefile(CONFIG_FILE, encoded)
 	end)
-
-	if not writeOk then
-		warn("[SAVE] Ошибка записи: " .. tostring(err))
-		return false
-	end
+	if not writeOk then return false end
 
 	saveState.lastSave = tick()
 	print("[SAVE] Сохранено: " .. CONFIG_FILE .. " (" .. tostring(#encoded) .. " байт)")
 	return true
 end
 
--- ============================================================
--- LOAD
--- ============================================================
 function Save.load()
-	if not hasFs() then
-		warn("[SAVE] Executor не поддерживает readfile")
-		return false
-	end
-
+	if not hasFs() then return false end
 	if not fileExists(CONFIG_FILE) then
-		print("[SAVE] Файл " .. CONFIG_FILE .. " не найден — используется дефолт")
+		print("[SAVE] Файл не найден — используется дефолт")
 		return false
 	end
 
-	local readOk, content = pcall(function()
-		return readfile(CONFIG_FILE)
-	end)
-
-	if not readOk or not content then
-		warn("[SAVE] Ошибка чтения файла")
-		return false
-	end
+	local readOk, content = pcall(function() return readfile(CONFIG_FILE) end)
+	if not readOk or not content then return false end
 
 	local decodeOk, data = pcall(function()
 		return HttpService:JSONDecode(content)
 	end)
+	if not decodeOk or type(data) ~= "table" then return false end
 
-	if not decodeOk or type(data) ~= "table" then
-		warn("[SAVE] Ошибка декодирования JSON")
-		return false
-	end
-
-	local applied, skipped = 0, 0
-
+	local applied = 0
 	for key, sub in pairs(saveState.subscriptions) do
 		if sub and sub.set and data[key] ~= nil then
 			local ok = pcall(sub.set, data[key])
-			if ok then
-				applied = applied + 1
-			else
-				skipped = skipped + 1
-			end
+			if ok then applied = applied + 1 end
 		end
 	end
 
 	saveState.loaded = true
-	print("[SAVE] Загружено: " .. applied .. " применено, " .. skipped .. " пропущено")
+	print("[SAVE] Загружено: " .. applied .. " настроек")
 	return true
 end
 
--- ============================================================
--- RESET
--- ============================================================
 function Save.reset()
 	if hasFs() and fileExists(CONFIG_FILE) then
-		local ok = pcall(function()
-			writefile(CONFIG_FILE, "{}")
-		end)
-		if ok then
-			print("[SAVE] Файл сброшен")
-		end
+		pcall(function() writefile(CONFIG_FILE, "{}") end)
+		print("[SAVE] Файл сброшен")
 	end
 end
 
 function Save.deleteFile()
 	if hasFs() and fileExists(CONFIG_FILE) then
-		pcall(function()
-			writefile(CONFIG_FILE, "{}")
-		end)
-		print("[SAVE] Файл удалён")
+		pcall(function() writefile(CONFIG_FILE, "{}") end)
 	end
 end
 
@@ -177,19 +132,16 @@ end
 -- ============================================================
 local function startAutoSave()
 	if not hasFs() then return end
-
 	local lastSnapshot = ""
 
 	task.spawn(function()
 		while true do
 			task.wait(saveState.saveDelay)
-
 			if saveState.enabled and saveState.loaded then
 				local data = collectValues()
 				local ok, encoded = pcall(function()
 					return HttpService:JSONEncode(data)
 				end)
-
 				if ok and encoded ~= lastSnapshot then
 					lastSnapshot = encoded
 					Save.save()
@@ -200,7 +152,7 @@ local function startAutoSave()
 end
 
 -- ============================================================
--- UI (page 3) — КОМПАКТНАЯ ВЕРСИЯ
+-- UI (page 3) — КОМПАКТНО (влезает в 260)
 -- ============================================================
 local function buildUI()
 	page = Hub.Page(3)
@@ -212,22 +164,22 @@ local function buildUI()
 	local statusText = hasFs() and "Ready" or "NO FS"
 	local statusColor = hasFs() and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
 
-	-- статус-лейбл
+	-- заголовок + статус одной строкой
 	local statusLabel = Elements.label(page,
-		"SAVE CONFIG — " .. statusText, 250,
-		{ color = statusColor, size = 10, font = Enum.Font.GothamBold })
+		"SAVE — " .. statusText, 170,
+		{ color = statusColor, size = 9, font = Enum.Font.GothamBold })
 
-	-- auto save (компактно)
-	Elements.label(page, "Auto Save", 268)
-	Hub.Toggles.autoSave = Elements.switch(page, 266, function(on)
+	-- Auto Save
+	Elements.label(page, "Auto Save", 186)
+	Hub.Toggles.autoSave = Elements.switch(page, 184, function(on)
 		saveState.enabled = on
 		print("[SAVE] Auto-save " .. (on and "ON" or "OFF"))
 	end)
 
-	-- кнопки в одну строку
+	-- 3 кнопки в строку
 	local btnHolder = Instance.new("Frame")
-	btnHolder.Size = UDim2.new(1, -20, 0, 24)
-	btnHolder.Position = UDim2.new(0, 10, 0, 288)
+	btnHolder.Size = UDim2.new(1, -16, 0, 20)
+	btnHolder.Position = UDim2.new(0, 8, 0, 204)
 	btnHolder.BackgroundTransparency = 1
 	btnHolder.Parent = page
 
@@ -236,52 +188,46 @@ local function buildUI()
 	btnLayout.Padding = UDim.new(0, 4)
 	btnLayout.Parent = btnHolder
 
-	-- SAVE
-	local saveBtn = Elements.button(btnHolder, "Save", 1,
-		Color3.fromRGB(0, 130, 0), 80)
-	saveBtn.Size = UDim2.new(0, 80, 0, 22)
-	saveBtn.TextSize = 11
+	local saveBtn = Elements.button(btnHolder, "Save", 1, Color3.fromRGB(0, 130, 0), 70)
+	saveBtn.Size = UDim2.new(0, 70, 0, 20)
+	saveBtn.TextSize = 10
 	saveBtn.MouseButton1Click:Connect(function()
 		if Save.save() then
-			statusLabel.Text = "SAVE CONFIG — Saved ✓"
+			statusLabel.Text = "SAVE — Saved ✓"
 			statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
 			task.delay(2, function()
-				statusLabel.Text = "SAVE CONFIG — " .. statusText
+				statusLabel.Text = "SAVE — " .. statusText
 				statusLabel.TextColor3 = statusColor
 			end)
 		else
-			statusLabel.Text = "SAVE CONFIG — FAILED"
+			statusLabel.Text = "SAVE — FAILED"
 			statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
 		end
 	end)
 
-	-- LOAD
-	local loadBtn = Elements.button(btnHolder, "Load", 2,
-		Color3.fromRGB(0, 100, 180), 80)
-	loadBtn.Size = UDim2.new(0, 80, 0, 22)
-	loadBtn.TextSize = 11
+	local loadBtn = Elements.button(btnHolder, "Load", 2, Color3.fromRGB(0, 100, 180), 70)
+	loadBtn.Size = UDim2.new(0, 70, 0, 20)
+	loadBtn.TextSize = 10
 	loadBtn.MouseButton1Click:Connect(function()
 		if Save.load() then
-			statusLabel.Text = "SAVE CONFIG — Loaded ✓"
+			statusLabel.Text = "SAVE — Loaded ✓"
 			statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
 			task.delay(2, function()
-				statusLabel.Text = "SAVE CONFIG — " .. statusText
+				statusLabel.Text = "SAVE — " .. statusText
 				statusLabel.TextColor3 = statusColor
 			end)
 		else
-			statusLabel.Text = "SAVE CONFIG — No file"
+			statusLabel.Text = "SAVE — No file"
 			statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
 		end
 	end)
 
-	-- RESET
-	local resetBtn = Elements.button(btnHolder, "Reset", 3,
-		Color3.fromRGB(150, 0, 0), 70)
-	resetBtn.Size = UDim2.new(0, 70, 0, 22)
-	resetBtn.TextSize = 11
+	local resetBtn = Elements.button(btnHolder, "Reset", 3, Color3.fromRGB(150, 0, 0), 60)
+	resetBtn.Size = UDim2.new(0, 60, 0, 20)
+	resetBtn.TextSize = 10
 	resetBtn.MouseButton1Click:Connect(function()
 		Save.reset()
-		statusLabel.Text = "SAVE CONFIG — Reset (restart)"
+		statusLabel.Text = "SAVE — Reset (restart)"
 		statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
 	end)
 end
@@ -312,28 +258,19 @@ function Save.init(hub)
 			end
 		end
 
-		-- ESP
 		reg("esp.players",   Hub.Toggles.espPlayers)
 		reg("esp.tools",     Hub.Toggles.espTools)
 		reg("esp.prompts",   Hub.Toggles.espPrompts)
 		reg("esp.monsters",  Hub.Toggles.espMonsters)
 		reg("esp.instant",   Hub.Toggles.instantPrompt)
-
-		-- Movement
 		reg("movement.speed",      Hub.Toggles.speed)
 		reg("movement.fov",        Hub.Toggles.fov)
 		reg("movement.fullbright", Hub.Toggles.fullbright)
-
-		-- Bypass
-		reg("bypass.anticheat", Hub.Toggles.bypass)
-		reg("bypass.doorReach", Hub.Toggles.doorReach)
-
-		-- Notify
-		reg("notify.entity", Hub.Toggles.entityNotify)
-
-		-- Misc
-		reg("misc.antiLag",       Hub.Toggles.antiLag)
-		reg("misc.infiniteItems", Hub.Toggles.infiniteItems)
+		reg("bypass.anticheat",    Hub.Toggles.bypass)
+		reg("bypass.doorReach",    Hub.Toggles.doorReach)
+		reg("notify.entity",       Hub.Toggles.entityNotify)
+		reg("misc.antiLag",        Hub.Toggles.antiLag)
+		reg("misc.infiniteItems",  Hub.Toggles.infiniteItems)
 
 		local count = 0
 		for _ in pairs(saveState.subscriptions) do count = count + 1 end
