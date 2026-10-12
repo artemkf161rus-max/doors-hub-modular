@@ -1,10 +1,12 @@
+-- ============================================================
+-- ============  MODULE: ESP  ==================================
+-- ============================================================
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ProximityPromptService = game:GetService("ProximityPromptService")
 local RunService = game:GetService("RunService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local player = Players.LocalPlayer
 
-local Misc = {}
+local ESP = {}
 
 -- ==================== STATE ====================
 local Config
@@ -15,376 +17,725 @@ local page
 
 local connections = {}
 
--- anti-lag
-local lagState = {
-	enabled = false,
-	saved = {},
-}
-
--- infinite items
-local infState = {
-	enabled = false,
-}
-
--- fake prompts registry
-local FakePrompts = {}  -- [fake] = original
-
--- контейнер для оригинальных prompt'ов
-local PromptContainer = nil
-
--- список "замочных" prompt'ов — те, где важно НЕ потратить предмет
-local LOCK_PROMPT_NAMES = {
-	UnlockPrompt = true,
-	SkullPrompt = true,
-	LockPrompt = true,
-	ThingToEnable = true,
-	FusesPrompt = true,
-}
-
--- предметы, которые можно дюпать
-local ItemNames = {
-	Lockpick = "Lockpicks",
-	Shears = "Shears",
-	SkeletonKey = "Skeleton Key",
-	Multitool = "Multitool",
-	Key = "Key",
-	KeyBackdoor = "Backdoor Key",
-	KeyElectrical = "Electrical Key",
-	KeyIron = "Iron Key",
-	GeneratorFuse = "Generator Fuse",
-}
+-- объекты
+local espObjects        = {}  -- [Player] = {highlight, billboard}
+local toolEspObjects    = {}  -- [Tool] = {highlight, billboard, nameLabel}
+local promptEspObjects  = {}  -- [Target] = {highlight, billboard, nameLabel, promptLabel, distLabel, prompt}
+local monsterEspObjects = {}  -- [Target] = {highlight, billboard, nameLabel, distLabel}
+local savedPrompts      = {}  -- [ProximityPrompt] = saved settings (instant)
 
 local function track(conn)
 	table.insert(connections, conn)
 	return conn
 end
 
-local function getPromptContainer()
-	if PromptContainer and PromptContainer.Parent then return PromptContainer end
+local function getPlayerPos()
+	local char = player.Character
+	if not char then return nil end
+	local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
+	return root and root.Position
+end
 
-	if gethui then
-		PromptContainer = Instance.new("Folder")
-		PromptContainer.Name = "PromptContainer_" .. tostring(math.random(1, 99999))
-		PromptContainer.Parent = gethui()
+local function getModelPart(target)
+	if not target then return nil end
+	if target:IsA("Model") then
+		return target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart")
+	elseif target:IsA("BasePart") then
+		return target
+	end
+	return nil
+end
+
+-- ============================================================
+-- ============  ESP PLAYERS  =================================
+-- ============================================================
+local function createESP(targetPlayer)
+	if targetPlayer == player or espObjects[targetPlayer] then return end
+	local char = targetPlayer.Character
+	if not char then return end
+
+	local hl = Instance.new("Highlight")
+	hl.Name = "ESP_Highlight"
+	hl.FillColor = Color3.fromRGB(255, 0, 0)
+	hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+	hl.FillTransparency = 0.5
+	hl.OutlineTransparency = 0
+	hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	hl.Adornee = char
+	hl.Parent = char
+
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "ESP_Billboard"
+	bb.Size = UDim2.new(0, 200, 0, 30)
+	bb.StudsOffset = Vector3.new(0, 3, 0)
+	bb.AlwaysOnTop = true
+	bb.Adornee = char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
+	bb.Parent = char
+
+	local nl = Instance.new("TextLabel")
+	nl.Size = UDim2.new(1, 0, 0, 20)
+	nl.BackgroundTransparency = 1
+	nl.Text = targetPlayer.Name
+	nl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nl.TextStrokeTransparency = 0
+	nl.Font = Enum.Font.GothamBold
+	nl.TextSize = 14
+	nl.Parent = bb
+
+	espObjects[targetPlayer] = { highlight = hl, billboard = bb }
+end
+
+local function removeESP(targetPlayer)
+	local d = espObjects[targetPlayer]
+	if d then
+		if d.highlight then d.highlight:Destroy() end
+		if d.billboard then d.billboard:Destroy() end
+		espObjects[targetPlayer] = nil
+	end
+end
+
+local function clearAllESP()
+	for p in pairs(espObjects) do removeESP(p) end
+end
+
+local function watchPlayer(p)
+	track(p.CharacterAdded:Connect(function()
+		if Toggles.espPlayers and Toggles.espPlayers.get() then
+			removeESP(p)
+			task.wait(0.5)
+			createESP(p)
+		end
+	end))
+end
+
+-- ============================================================
+-- ============  ESP TOOLS  ===================================
+-- ============================================================
+local function createToolESP(tool)
+	if toolEspObjects[tool] or not tool:IsA("Tool") then return end
+
+	local isDoor = tool.Name:sub(1, 4) == "Door"
+	local isLever = tool.Name:sub(1, 5) == "Lever" or tool.Name == "LeverToGate"
+
+	local hlColor, textColor
+	if isDoor then
+		hlColor = Config.DOOR_COLOR
+		textColor = Config.DOOR_COLOR
+	elseif isLever then
+		hlColor = Config.LEVER_COLOR
+		textColor = Config.LEVER_COLOR
 	else
-		PromptContainer = Instance.new("Folder")
-		PromptContainer.Name = "PromptContainer"
-		PromptContainer.Parent = game:GetService("CoreGui")
+		hlColor = Config.TOOL_COLOR
+		textColor = Config.TOOL_COLOR
 	end
 
-	return PromptContainer
+	local hl = Instance.new("Highlight")
+	hl.Name = "ToolESP_Highlight"
+	hl.FillColor = hlColor
+	hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+	hl.FillTransparency = 0.4
+	hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	hl.Adornee = tool
+	hl.Parent = tool
+
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "ToolESP_Billboard"
+	bb.Size = UDim2.new(0, 180, 0, 22)
+	bb.StudsOffset = Vector3.new(0, 1.5, 0)
+	bb.AlwaysOnTop = true
+	bb.Parent = tool
+
+	local ap = tool:FindFirstChildWhichIsA("BasePart")
+	bb.Adornee = ap or tool
+
+	local nl = Instance.new("TextLabel")
+	nl.Size = UDim2.new(1, 0, 1, 0)
+	nl.BackgroundTransparency = 1
+	nl.Text = tool.Name
+	nl.TextColor3 = textColor
+	nl.TextStrokeTransparency = 0
+	nl.Font = Enum.Font.GothamBold
+	nl.TextSize = 14
+	nl.Parent = bb
+
+	toolEspObjects[tool] = { highlight = hl, billboard = bb, nameLabel = nl }
 end
 
-------------------------------------------------------------
--- ANTI-LAG
-------------------------------------------------------------
-local function isScreechSound(obj)
-	if not obj.Parent then return false end
-	local pn = string.lower(obj.Parent.Name)
-	return string.find(pn, "screech", 1, true) ~= nil
+local function removeToolESP(tool)
+	local d = toolEspObjects[tool]
+	if d then
+		if d.highlight then d.highlight:Destroy() end
+		if d.billboard then d.billboard:Destroy() end
+		toolEspObjects[tool] = nil
+	end
 end
 
-local function applyAntiLag()
+local function clearAllToolESP()
+	for t in pairs(toolEspObjects) do removeToolESP(t) end
+end
+
+local function scanTools()
 	for _, obj in ipairs(workspace:GetDescendants()) do
-		if obj:IsA("BasePart") then
-			if not lagState.saved[obj] then
-				lagState.saved[obj] = { Material = obj.Material }
+		if obj:IsA("Tool") then
+			if Toggles.espTools and Toggles.espTools.get() then createToolESP(obj) else removeToolESP(obj) end
+		end
+	end
+	for _, p in ipairs(Players:GetPlayers()) do
+		local char = p.Character
+		if char then
+			for _, obj in ipairs(char:GetChildren()) do
+				if obj:IsA("Tool") then
+					if Toggles.espTools and Toggles.espTools.get() then createToolESP(obj) else removeToolESP(obj) end
+				end
 			end
-			obj.Material = Enum.Material.SmoothPlastic
-			obj.Reflectance = 0
-		elseif obj:IsA("Decal") or obj:IsA("Texture") then
-			obj.Transparency = 1
-		elseif obj:IsA("ParticleEmitter")
-			or obj:IsA("Trail")
-			or obj:IsA("Smoke")
-			or obj:IsA("Fire")
-			or obj:IsA("Sparkles")
-			or obj:IsA("Beam") then
-			obj.Enabled = false
-		elseif obj:IsA("Sound") then
-			if isScreechSound(obj) then
-				obj.Volume = 1
-			else
-				obj.Volume = 0
+		end
+		local bp = p:FindFirstChildOfClass("Backpack")
+		if bp then
+			for _, obj in ipairs(bp:GetChildren()) do
+				if obj:IsA("Tool") then
+					if Toggles.espTools and Toggles.espTools.get() then createToolESP(obj) else removeToolESP(obj) end
+				end
 			end
 		end
 	end
 end
 
-local function restoreAntiLag()
-	for obj, data in pairs(lagState.saved) do
-		if obj and obj.Parent and obj:IsA("BasePart") and data.Material then
-			obj.Material = data.Material
+-- ============================================================
+-- ============  ESP PROMPTS  =================================
+-- ============================================================
+local function isPromptBlacklisted(target)
+	if not target then return false end
+	local name = target.Name
+	if Config.PROMPT_BLACKLIST[name] then return true end
+	for blocked in pairs(Config.PROMPT_BLACKLIST) do
+		if string.find(string.lower(name), string.lower(blocked), 1, true) then
+			return true
 		end
-	end
-	lagState.saved = {}
-end
-
-------------------------------------------------------------
--- FAKE PROMPTS
-------------------------------------------------------------
-local function isLockPrompt(prompt)
-	if LOCK_PROMPT_NAMES[prompt.Name] then return true end
-	if prompt.Parent and prompt.Parent:GetAttribute("Locked") == true then return true end
-	if prompt.Parent and prompt.Parent.Parent
-		and prompt.Parent.Parent.Name == "Locker_Small_Locked"
-		and prompt.Name == "ActivateEventPrompt" then
-		return true
 	end
 	return false
 end
 
-local function makeFakePrompt(originalPrompt)
-	-- уже fake?
-	if originalPrompt:GetAttribute("FakePrompt") then return end
-	-- уже обработан?
-	for fake in pairs(FakePrompts) do
-		if FakePrompts[fake] == originalPrompt then return end
-	end
-
-	local fake = originalPrompt:Clone()
-	fake:SetAttribute("FakePrompt", true)
-	fake.Name = originalPrompt.Name
-	fake.Parent = originalPrompt.Parent
-	task.wait()
-	fake.Enabled = originalPrompt.Enabled
-
-	-- прячем оригинал
-	originalPrompt.Parent = getPromptContainer()
-
-	-- сохраняем связь
-	FakePrompts[fake] = originalPrompt
-
-	-- синхронизация Enabled
-	local enabledConn = originalPrompt:GetPropertyChangedSignal("Enabled"):Connect(function()
-		if fake and fake.Parent then
-			fake.Enabled = originalPrompt.Enabled
+local function isPromptBlueListed(target)
+	if not target then return false end
+	local name = string.lower(target.Name)
+	for blue in pairs(Config.PROMPT_BLUELIST) do
+		if string.sub(name, 1, #blue) == string.lower(blue) then
+			return true
 		end
-	end)
-	track(enabledConn)
-
-	-- очистка при уничтожении
-	originalPrompt.Destroying:Once(function()
-		if fake and fake.Parent then fake:Destroy() end
-		FakePrompts[fake] = nil
-	end)
-	fake.Destroying:Once(function()
-		FakePrompts[fake] = nil
-	end)
+	end
+	return false
 end
 
-local function scanPromptsForFake()
+local function getPromptTarget(prompt)
+	local parent = prompt.Parent
+	if not parent then return nil end
+	if parent:IsA("Model") then
+		return parent
+	elseif parent:IsA("BasePart") then
+		local model = parent:FindFirstAncestorOfClass("Model")
+		return model or parent
+	end
+	return nil
+end
+
+local function createPromptESP(prompt)
+	local target = getPromptTarget(prompt)
+	if not target or promptEspObjects[target] then return end
+	if target == player.Character or isPromptBlacklisted(target) then return end
+
+	local isDoor  = target.Name:sub(1, 4) == "Door"
+	local isLever = target.Name:sub(1, 5) == "Lever" or target.Name == "LeverToGate"
+	local isBlue  = isPromptBlueListed(target)
+
+	local fc, tc
+	if isDoor then fc, tc = Config.DOOR_COLOR, Config.DOOR_COLOR
+	elseif isLever then fc, tc = Config.LEVER_COLOR, Config.LEVER_COLOR
+	elseif isBlue then fc, tc = Config.KEY_COLOR, Config.KEY_COLOR
+	else fc, tc = Config.PROMPT_COLOR, Config.PROMPT_COLOR end
+
+	local hl = Instance.new("Highlight")
+	hl.Name = "PromptESP_Highlight"
+	hl.FillColor = fc
+	hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+	hl.FillTransparency = 0.5
+	hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	hl.Adornee = target
+	hl.Parent = target
+
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "PromptESP_Billboard"
+	bb.Size = UDim2.new(0, 220, 0, 58)
+	bb.StudsOffset = Vector3.new(0, 2.5, 0)
+	bb.AlwaysOnTop = true
+
+	local ap = getModelPart(target)
+	bb.Adornee = ap or target
+	bb.Parent = ap or target
+
+	local nl = Instance.new("TextLabel")
+	nl.Size = UDim2.new(1, 0, 0, 18)
+	nl.BackgroundTransparency = 1
+	nl.Text = target.Name
+	nl.TextColor3 = tc
+	nl.TextStrokeTransparency = 0
+	nl.Font = Enum.Font.GothamBold
+	nl.TextSize = 14
+	nl.Parent = bb
+
+	local pl = Instance.new("TextLabel")
+	pl.Size = UDim2.new(1, 0, 0, 16)
+	pl.Position = UDim2.new(0, 0, 0, 18)
+	pl.BackgroundTransparency = 1
+	pl.Text = prompt.ActionText ~= "" and prompt.ActionText or "Interact"
+	pl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	pl.TextStrokeTransparency = 0
+	pl.Font = Enum.Font.Gotham
+	pl.TextSize = 12
+	pl.Parent = bb
+
+	local dl = Instance.new("TextLabel")
+	dl.Size = UDim2.new(1, 0, 0, 16)
+	dl.Position = UDim2.new(0, 0, 0, 34)
+	dl.BackgroundTransparency = 1
+	dl.Text = "[0 studs]"
+	dl.TextColor3 = Color3.fromRGB(180, 255, 180)
+	dl.TextStrokeTransparency = 0
+	dl.Font = Enum.Font.GothamBold
+	dl.TextSize = 12
+	dl.Parent = bb
+
+	promptEspObjects[target] = {
+		highlight = hl,
+		billboard = bb,
+		nameLabel = nl,
+		promptLabel = pl,
+		distLabel = dl,
+		prompt = prompt,
+	}
+end
+
+local function removePromptESP(target)
+	local d = promptEspObjects[target]
+	if d then
+		if d.highlight then d.highlight:Destroy() end
+		if d.billboard then d.billboard:Destroy() end
+		promptEspObjects[target] = nil
+	end
+end
+
+local function clearAllPromptESP()
+	for t in pairs(promptEspObjects) do removePromptESP(t) end
+end
+
+local function scanPrompts()
 	for _, obj in ipairs(workspace:GetDescendants()) do
-		if obj:IsA("ProximityPrompt") and not obj:GetAttribute("FakePrompt") then
-			if isLockPrompt(obj) then
-				makeFakePrompt(obj)
+		if obj:IsA("ProximityPrompt") then
+			local target = getPromptTarget(obj)
+			if target then
+				if Toggles.espPrompts and Toggles.espPrompts.get() and not isPromptBlacklisted(target) then
+					createPromptESP(obj)
+				else
+					removePromptESP(target)
+				end
 			end
 		end
 	end
 end
 
-local function onPromptAdded(obj)
-	if not obj:IsA("ProximityPrompt") then return end
-	if obj:GetAttribute("FakePrompt") then return end
-
-	task.wait(0.1)
-	if isLockPrompt(obj) then
-		makeFakePrompt(obj)
+-- ============================================================
+-- ============  ESP MONSTERS  ================================
+-- ============================================================
+local function isBlacklistedMonster(t)
+	if not t then return false end
+	local n = string.lower(t.Name)
+	for b in pairs(Config.MONSTER_BLACKLIST) do
+		if string.find(n, string.lower(b), 1, true) then return true end
 	end
+	return false
 end
 
-------------------------------------------------------------
--- FIRE PROMPT HELPER
-------------------------------------------------------------
-local function firePrompt(prompt)
-	if not prompt or not prompt.Parent then return end
+local function isPlayerChar(t)
+	if not t or not t:IsA("Model") then return false end
+	return Players:GetPlayerFromCharacter(t) ~= nil
+end
 
-	if fireproximityprompt then
-		pcall(function() fireproximityprompt(prompt) end)
+local function isMonster(t)
+	if not t or isBlacklistedMonster(t) then return false end
+	local n = string.lower(t.Name)
+	for _, p in ipairs(Config.MONSTER_PREFIXES) do
+		if string.sub(n, 1, #p) == string.lower(p) then return true end
+	end
+	return false
+end
+
+local function isRig(t)
+	if not t or not t:IsA("Model") then return false end
+	if isPlayerChar(t) or isMonster(t) or isBlacklistedMonster(t) then return false end
+	if not t:FindFirstChildOfClass("Humanoid") then return false end
+	if not t:FindFirstChild("HumanoidRootPart") then return false end
+	return true
+end
+
+local function shouldMonster(t)
+	if isPlayerChar(t) or isBlacklistedMonster(t) then return false end
+	return isMonster(t) or isRig(t)
+end
+
+local function createMonsterESP(target)
+	if monsterEspObjects[target] or not shouldMonster(target) then return end
+
+	local fc, oc, tc
+	if isMonster(target) then
+		fc = Color3.fromRGB(255, 0, 0)
+		oc = Color3.fromRGB(255, 100, 100)
+		tc = Color3.fromRGB(255, 50, 50)
 	else
-		pcall(function()
-			prompt:InputHoldBegin()
-			task.wait(math.max(prompt.HoldDuration, 0.05))
-			prompt:InputHoldEnd()
-		end)
+		fc = Color3.fromRGB(255, 140, 0)
+		oc = Color3.fromRGB(255, 200, 100)
+		tc = Color3.fromRGB(255, 180, 60)
+	end
+
+	local hl = Instance.new("Highlight")
+	hl.Name = "MonsterESP_Highlight"
+	hl.FillColor = fc
+	hl.OutlineColor = oc
+	hl.FillTransparency = 0.4
+	hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	hl.Adornee = target
+	hl.Parent = target
+
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "MonsterESP_Billboard"
+	bb.Size = UDim2.new(0, 220, 0, 40)
+	bb.StudsOffset = Vector3.new(0, 3, 0)
+	bb.AlwaysOnTop = true
+
+	local ap = getModelPart(target)
+	bb.Adornee = ap or target
+	bb.Parent = ap or target
+
+	local nl = Instance.new("TextLabel")
+	nl.Size = UDim2.new(1, 0, 0, 20)
+	nl.BackgroundTransparency = 1
+	nl.Text = (isMonster(target) and "⚠ " or "[Rig] ") .. target.Name
+		.. (isMonster(target) and " ⚠" or "")
+	nl.TextColor3 = tc
+	nl.TextStrokeTransparency = 0
+	nl.Font = Enum.Font.GothamBold
+	nl.TextSize = 16
+	nl.Parent = bb
+
+	local dl = Instance.new("TextLabel")
+	dl.Size = UDim2.new(1, 0, 0, 16)
+	dl.Position = UDim2.new(0, 0, 0, 20)
+	dl.BackgroundTransparency = 1
+	dl.Text = "[0 studs]"
+	dl.TextColor3 = Color3.fromRGB(255, 220, 180)
+	dl.TextStrokeTransparency = 0
+	dl.Font = Enum.Font.GothamBold
+	dl.TextSize = 12
+	dl.Parent = bb
+
+	monsterEspObjects[target] = {
+		highlight = hl,
+		billboard = bb,
+		nameLabel = nl,
+		distLabel = dl,
+	}
+end
+
+local function removeMonsterESP(target)
+	local d = monsterEspObjects[target]
+	if d then
+		if d.highlight then d.highlight:Destroy() end
+		if d.billboard then d.billboard:Destroy() end
+		monsterEspObjects[target] = nil
 	end
 end
 
-------------------------------------------------------------
--- INFINITE ITEMS
-------------------------------------------------------------
-local function onPromptTriggered(prompt)
-	if not infState.enabled then return end
-	if not prompt:GetAttribute("FakePrompt") then return end
-
-	print("[INF] FakePrompt triggered:", prompt.Name)
-
-	local char = player.Character
-	if not char then return end
-
-	local anyTool = char:FindFirstChildOfClass("Tool")
-	if not anyTool then
-		print("[INF] нет tool в руках")
-		return
-	end
-
-	local toolData = ItemNames[anyTool.Name]
-	if not toolData then
-		print("[INF] tool не в списке:", anyTool.Name)
-		-- просто активируем оригинал
-		local realPrompt = FakePrompts[prompt]
-		if realPrompt then firePrompt(realPrompt) end
-		return
-	end
-
-	print("[INF] Tool:", anyTool.Name, "→", toolData)
-
-	local drops = workspace:FindFirstChild("Drops")
-	local rf = ReplicatedStorage:FindFirstChild("RemotesFolder")
-
-	if not drops then warn("[INF] нет workspace.Drops") return end
-	if not rf then warn("[INF] нет RemotesFolder") return end
-
-	local dropRemote = rf:FindFirstChild("DropItem")
-	if not dropRemote then warn("[INF] нет DropItem remote") return end
-
-	-- ждём новый дроп
-	local gotDrop = false
-	local dropConn
-	dropConn = drops.ChildAdded:Connect(function(newTool)
-		if gotDrop then return end
-		gotDrop = true
-		if dropConn then dropConn:Disconnect() end
-
-		print("[INF] Новый дроп:", newTool.Name)
-		task.wait(0.15)
-
-		local dropPrompt = newTool:FindFirstChild("ModulePrompt")
-			or newTool:FindFirstChildWhichIsA("ProximityPrompt")
-
-		if dropPrompt then
-			print("[INF] Подбираю дроп")
-			firePrompt(dropPrompt)
-		end
-
-		-- активируем оригинальный prompt (чтобы игра думала что всё ок)
-		local realPrompt = FakePrompts[prompt]
-		if realPrompt then
-			firePrompt(realPrompt)
-		end
-	end)
-	track(dropConn)
-
-	-- страховка — если дроп не появился за 2 секунды
-	task.delay(2, function()
-		if not gotDrop and dropConn then
-			dropConn:Disconnect()
-			warn("[INF] Дроп не появился за 2 сек")
-			local realPrompt = FakePrompts[prompt]
-			if realPrompt then firePrompt(realPrompt) end
-		end
-	end)
-
-	-- фаерим DropItem
-	print("[INF] Фаерю DropItem")
-	pcall(function() dropRemote:FireServer(anyTool) end)
+local function clearAllMonsterESP()
+	for t in pairs(monsterEspObjects) do removeMonsterESP(t) end
 end
 
-------------------------------------------------------------
--- UI (page 3)
-------------------------------------------------------------
+local function scanMonsters()
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if shouldMonster(obj) then
+			if Toggles.espMonsters and Toggles.espMonsters.get() then
+				createMonsterESP(obj)
+			else
+				removeMonsterESP(obj)
+			end
+		end
+	end
+end
+
+-- ============================================================
+-- ============  INSTANT PROMPT  ==============================
+-- ============================================================
+local function makePromptInstant(prompt)
+	if not prompt:IsA("ProximityPrompt") then return end
+	if savedPrompts[prompt] then return end
+	savedPrompts[prompt] = {
+		HoldDuration = prompt.HoldDuration,
+		MaxActivationDistance = prompt.MaxActivationDistance,
+		RequiresLineOfSight = prompt.RequiresLineOfSight,
+		ClickablePrompt = prompt.ClickablePrompt,
+	}
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	prompt.ClickablePrompt = true
+end
+
+local function restorePrompt(prompt)
+	local s = savedPrompts[prompt]
+	if not s then return end
+	if prompt and prompt.Parent then
+		prompt.HoldDuration = s.HoldDuration
+		prompt.MaxActivationDistance = s.MaxActivationDistance
+		prompt.RequiresLineOfSight = s.RequiresLineOfSight
+		prompt.ClickablePrompt = s.ClickablePrompt
+	end
+	savedPrompts[prompt] = nil
+end
+
+local function applyInstant()
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("ProximityPrompt") then
+			if Toggles.instantPrompt and Toggles.instantPrompt.get() then
+				makePromptInstant(obj)
+			else
+				restorePrompt(obj)
+			end
+		end
+	end
+end
+
+-- ============================================================
+-- ============  UPDATE LOOP  =================================
+-- ============================================================
+local function updateLoop()
+	local myPos = getPlayerPos()
+
+	-- ESP Players
+	if Toggles.espPlayers and Toggles.espPlayers.get() then
+		for tp, data in pairs(espObjects) do
+			local char = tp.Character
+			local charPos
+			if char then
+				local h = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
+				charPos = h and h.Position
+			end
+			local inRange = true
+			if myPos and charPos then
+				inRange = (charPos - myPos).Magnitude <= Config.ESP_RADIUS
+			end
+			if char and data.highlight and inRange then
+				data.highlight.Enabled = true
+				data.highlight.Adornee = char
+				if data.billboard then
+					data.billboard.Enabled = true
+					data.billboard.Adornee = char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
+				end
+			else
+				if data.highlight then data.highlight.Enabled = false end
+				if data.billboard then data.billboard.Enabled = false end
+			end
+		end
+	end
+
+	-- ESP Tools
+	if Toggles.espTools and Toggles.espTools.get() then
+		for tool, data in pairs(toolEspObjects) do
+			if not tool.Parent then
+				removeToolESP(tool)
+			else
+				local ap = tool:FindFirstChildWhichIsA("BasePart")
+				local toolPos = ap and ap.Position
+				local inRange = true
+				if myPos and toolPos then
+					inRange = (toolPos - myPos).Magnitude <= Config.ESP_RADIUS
+				end
+				if data.highlight then
+					data.highlight.Enabled = inRange
+					data.highlight.Adornee = tool
+				end
+				if data.billboard then
+					data.billboard.Enabled = inRange
+					data.billboard.Adornee = ap or tool
+				end
+				if data.nameLabel then data.nameLabel.Text = tool.Name end
+			end
+		end
+	end
+
+	-- ESP Prompts
+	if Toggles.espPrompts and Toggles.espPrompts.get() then
+		for target, data in pairs(promptEspObjects) do
+			if not target.Parent then
+				removePromptESP(target)
+			else
+				local ap = getModelPart(target)
+				local inRange = true
+				if myPos and ap then
+					inRange = (ap.Position - myPos).Magnitude <= Config.ESP_RADIUS
+				end
+				if data.billboard then
+					data.billboard.Enabled = inRange
+					data.billboard.Adornee = ap or target
+				end
+				if data.highlight then
+					data.highlight.Enabled = inRange
+					data.highlight.Adornee = target
+				end
+				if data.nameLabel then data.nameLabel.Text = target.Name end
+				if data.promptLabel and data.prompt and data.prompt.Parent then
+					data.promptLabel.Text = data.prompt.ActionText ~= "" and data.prompt.ActionText or "Interact"
+				end
+				if data.distLabel and myPos and ap then
+					data.distLabel.Text = string.format("[%.0f studs]", (ap.Position - myPos).Magnitude)
+				end
+			end
+		end
+	end
+
+	-- ESP Monsters
+	if Toggles.espMonsters and Toggles.espMonsters.get() then
+		for target, data in pairs(monsterEspObjects) do
+			if not target.Parent then
+				removeMonsterESP(target)
+			else
+				local ap = getModelPart(target)
+				if data.billboard then data.billboard.Adornee = ap or target end
+				if data.highlight then data.highlight.Adornee = target end
+				if data.distLabel and myPos and ap then
+					data.distLabel.Text = string.format("[%.0f studs]", (ap.Position - myPos).Magnitude)
+				end
+			end
+		end
+	end
+end
+
+-- ============================================================
+-- ============  UI (page 2)  =================================
+-- ============================================================
 local function buildUI()
-	page = Hub.Page(3)
+	page = Hub.Page(2)
 	if not page then
-		warn("[misc] page 3 не найдена")
+		warn("[ESP] page 2 не найдена")
 		return
 	end
 
-	-- ============ ANTI-LAG ============
-	Elements.label(page, "ANTI-LAG", 74)
-	Hub.Toggles.antiLag = Elements.switch(page, 72, function(on)
-		lagState.enabled = on
+	-- ESP PLAYERS
+	Elements.label(page, "ESP PLAYERS", 2)
+	Hub.Toggles.espPlayers = Elements.switch(page, 0, function(on)
 		if on then
-			applyAntiLag()
+			for _, p in ipairs(Players:GetPlayers()) do createESP(p) end
 		else
-			restoreAntiLag()
+			clearAllESP()
 		end
 	end)
 
-	-- ============ INFINITE ITEMS ============
-	Elements.label(page, "INFINITE ITEMS", 94)
+	-- ESP TOOLS
+	Elements.label(page, "ESP TOOLS", 22)
+	Hub.Toggles.espTools = Elements.switch(page, 20, function(on)
+		if on then scanTools() else clearAllToolESP() end
+	end)
 
-	local infHint = Elements.label(page,
-		"Lockpick, Skeleton Key, Shears, Multitool", 112,
-		{ color = Color3.fromRGB(150, 150, 150), size = 9,
-		  font = Enum.Font.Gotham })
+	-- ESP PROMPTS
+	Elements.label(page, "ESP PROMPTS", 42)
+	Hub.Toggles.espPrompts = Elements.switch(page, 40, function(on)
+		if on then scanPrompts() else clearAllPromptESP() end
+	end)
 
-	Hub.Toggles.infiniteItems = Elements.switch(page, 92, function(on)
-		infState.enabled = on
-		if on then
-			print("[MISC] Infinite Items ON")
-			scanPromptsForFake()
-		else
-			print("[MISC] Infinite Items OFF")
-		end
+	-- ESP MONSTERS
+	Elements.label(page, "ESP MONSTERS", 62)
+	Hub.Toggles.espMonsters = Elements.switch(page, 60, function(on)
+		if on then scanMonsters() else clearAllMonsterESP() end
+	end)
+
+	-- INSTANT PROMPT
+	Elements.label(page, "INSTANT PROMPT", 82)
+	Hub.Toggles.instantPrompt = Elements.switch(page, 80, function(on)
+		applyInstant()
 	end)
 end
 
-------------------------------------------------------------
--- INIT
-------------------------------------------------------------
-function Misc.init(hub)
+-- ============================================================
+-- ============  INIT  ========================================
+-- ============================================================
+function ESP.init(hub)
 	Hub = hub
 	Config = hub.Config
 	Toggles = hub.Toggles
 	Elements = hub.Elements or (hub.Objects and hub.Objects.Elements)
 
 	if not Elements then
-		warn("[misc] Elements не найдены — ui.lua должен грузиться первым")
+		warn("[ESP] Elements не найдены — ui.lua должен грузиться первым")
 		return
 	end
 
 	-- UI
 	buildUI()
 
-	-- сохраняем реестр в Hub
-	Hub.Objects.FakePrompts = FakePrompts
+	-- ============ PLAYERS ============
+	for _, p in ipairs(Players:GetPlayers()) do
+		watchPlayer(p)
+	end
+	track(Players.PlayerAdded:Connect(function(p)
+		watchPlayer(p)
+		if Toggles.espPlayers and Toggles.espPlayers.get() then
+			task.wait(0.5)
+			createESP(p)
+		end
+	end))
+	track(Players.PlayerRemoving:Connect(function(p)
+		removeESP(p)
+	end))
 
-	-- ============ FAKE PROMPTS SETUP ============
-	-- сканируем существующие prompts
-	task.spawn(scanPromptsForFake)
+	-- ============ TOOLS ============
+	track(workspace.DescendantAdded:Connect(function(obj)
+		if obj:IsA("Tool") and Toggles.espTools and Toggles.espTools.get() then
+			task.wait(Config.TOOL_WAIT or 0.1)
+			createToolESP(obj)
+		end
+	end))
 
-	-- следим за новыми
-	track(workspace.DescendantAdded:Connect(onPromptAdded))
-
-	-- ============ INFINITE ITEMS LISTENER ============
-	track(ProximityPromptService.PromptTriggered:Connect(onPromptTriggered))
-
-	-- ============ CLEANUP ============
-	function Misc.cleanup()
-		lagState.enabled = false
-		infState.enabled = false
-
-		restoreAntiLag()
-
-		-- восстанавливаем оригинальные prompts
-		for fake, original in pairs(FakePrompts) do
-			if original and original.Parent == PromptContainer then
-				if fake and fake.Parent then
-					original.Parent = fake.Parent
+	-- ============ PROMPTS ============
+	track(workspace.DescendantAdded:Connect(function(obj)
+		if obj:IsA("ProximityPrompt") then
+			if Toggles.espPrompts and Toggles.espPrompts.get() then
+				task.wait(Config.TOOL_WAIT or 0.1)
+				local target = getPromptTarget(obj)
+				if target and not isPromptBlacklisted(target) then
+					createPromptESP(obj)
 				end
 			end
-			if fake and fake.Parent then
-				fake:Destroy()
+			if Toggles.instantPrompt and Toggles.instantPrompt.get() then
+				task.wait(Config.TOOL_WAIT or 0.1)
+				makePromptInstant(obj)
 			end
 		end
-		FakePrompts = {}
-		Hub.Objects.FakePrompts = FakePrompts
+	end))
 
-		if PromptContainer and PromptContainer.Parent then
-			PromptContainer:Destroy()
+	-- ============ MONSTERS ============
+	track(workspace.DescendantAdded:Connect(function(obj)
+		if Toggles.espMonsters and Toggles.espMonsters.get() and shouldMonster(obj) then
+			task.wait(Config.TOOL_WAIT or 0.1)
+			createMonsterESP(obj)
 		end
-		PromptContainer = nil
+	end))
+
+	-- ============ MAIN LOOP ============
+	track(RunService.RenderStepped:Connect(updateLoop))
+
+	-- ============ CLEANUP ============
+	function ESP.cleanup()
+		clearAllESP()
+		clearAllToolESP()
+		clearAllPromptESP()
+		clearAllMonsterESP()
+		for p in pairs(savedPrompts) do restorePrompt(p) end
+		savedPrompts = {}
 
 		for _, conn in ipairs(connections) do
 			pcall(function() conn:Disconnect() end)
@@ -392,8 +743,8 @@ function Misc.init(hub)
 		connections = {}
 	end
 
-	print("[MISC] Модуль инициализирован")
-	return Misc
+	print("[ESP] Модуль инициализирован")
+	return ESP
 end
 
-return Misc
+return ESP
