@@ -1,5 +1,5 @@
 -- ============================================================
--- ============  MODULE: UI  ==================================
+-- ============  MODULE: UI (COMPACT)  ========================
 -- ============================================================
 local UI = {}
 
@@ -12,7 +12,6 @@ function UI.init(Hub)
 
 	local BASE = "https://raw.githubusercontent.com/artemkf161rus-max/doors-hub-modular/refs/heads/main/"
 
-	-- ==================== ЦВЕТА ====================
 	local COLORS = {
 		Background  = Color3.fromRGB(45, 0, 80),
 		Background2 = Color3.fromRGB(30, 0, 55),
@@ -27,7 +26,7 @@ function UI.init(Hub)
 	}
 	local FONT_BOLD = Enum.Font.GothamBold
 
-	-- ==================== ROOT GUI ====================
+	-- ==================== ROOT ====================
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "MenuUI"
 	gui.ResetOnSpawn = false
@@ -39,10 +38,9 @@ function UI.init(Hub)
 	local isLocked = false
 	Hub.IsLocked = function() return isLocked end
 
-	-- ==================== ХЕЛПЕРЫ ====================
 	local function corner(parent, r)
 		local c = Instance.new("UICorner")
-		c.CornerRadius = UDim.new(0, r or 8)
+		c.CornerRadius = UDim.new(0, r or 6)
 		c.Parent = parent
 		return c
 	end
@@ -50,7 +48,7 @@ function UI.init(Hub)
 	local function stroke(parent, color, thickness)
 		local s = Instance.new("UIStroke")
 		s.Color = color or COLORS.Stroke
-		s.Thickness = thickness or 2
+		s.Thickness = thickness or 1
 		s.Parent = parent
 		return s
 	end
@@ -92,20 +90,20 @@ function UI.init(Hub)
 	end
 
 	-- ============================================================
-	-- ============  ELEMENTS  ====================================
+	-- ELEMENTS — уменьшены размеры
 	-- ============================================================
 	local Elements = {}
 
 	function Elements.label(parent, text, y, cfg)
 		cfg = cfg or {}
 		local l = Instance.new("TextLabel")
-		l.Size = UDim2.new(1, -20, 0, 16)
-		l.Position = UDim2.new(0, 10, 0, y)
+		l.Size = UDim2.new(1, -16, 0, 14)
+		l.Position = UDim2.new(0, 8, 0, y)
 		l.BackgroundTransparency = 1
 		l.Text = text
 		l.TextColor3 = cfg.color or COLORS.Text
 		l.Font = cfg.font or FONT_BOLD
-		l.TextSize = cfg.size or 11
+		l.TextSize = cfg.size or 10
 		l.TextXAlignment = Enum.TextXAlignment.Left
 		l.Parent = parent
 		return l
@@ -113,8 +111,8 @@ function UI.init(Hub)
 
 	function Elements.switch(parent, y, callback)
 		local bg = Instance.new("TextButton")
-		bg.Size = UDim2.new(0, 40, 0, 20)
-		bg.Position = UDim2.new(1, -50, 0, y - 2)
+		bg.Size = UDim2.new(0, 34, 0, 16)
+		bg.Position = UDim2.new(1, -42, 0, y - 1)
 		bg.BackgroundColor3 = COLORS.SwitchOff
 		bg.BorderSizePixel = 0
 		bg.Text = ""
@@ -123,8 +121,8 @@ function UI.init(Hub)
 		corner(bg, 999)
 
 		local knob = Instance.new("Frame")
-		knob.Size = UDim2.new(0, 14, 0, 14)
-		knob.Position = UDim2.new(0, 3, 0.5, -7)
+		knob.Size = UDim2.new(0, 12, 0, 12)
+		knob.Position = UDim2.new(0, 2, 0.5, -6)
 		knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 		knob.BorderSizePixel = 0
 		knob.Parent = bg
@@ -132,10 +130,10 @@ function UI.init(Hub)
 
 		local state = false
 		local function update()
-			TweenService:Create(bg, TweenInfo.new(0.2),
+			TweenService:Create(bg, TweenInfo.new(0.15),
 				{BackgroundColor3 = state and COLORS.SwitchOn or COLORS.SwitchOff}):Play()
-			TweenService:Create(knob, TweenInfo.new(0.2),
-				{Position = state and UDim2.new(0, 23, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)}):Play()
+			TweenService:Create(knob, TweenInfo.new(0.15),
+				{Position = state and UDim2.new(0, 18, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)}):Play()
 			if callback then callback(state) end
 		end
 
@@ -154,8 +152,8 @@ function UI.init(Hub)
 
 	function Elements.slider(parent, y, min, max, default, callback)
 		local sb = Instance.new("Frame")
-		sb.Size = UDim2.new(1, -20, 0, 8)
-		sb.Position = UDim2.new(0, 10, 0, y)
+		sb.Size = UDim2.new(1, -16, 0, 6)
+		sb.Position = UDim2.new(0, 8, 0, y)
 		sb.BackgroundColor3 = COLORS.Background2
 		sb.BorderSizePixel = 0
 		sb.Active = true
@@ -170,7 +168,7 @@ function UI.init(Hub)
 		corner(fill, 999)
 
 		local knob = Instance.new("Frame")
-		knob.Size = UDim2.new(0, 14, 0, 14)
+		knob.Size = UDim2.new(0, 10, 0, 10)
 		knob.Position = UDim2.new((default - min) / (max - min), 0, 0.5, 0)
 		knob.AnchorPoint = Vector2.new(0, 0.5)
 		knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -222,115 +220,114 @@ function UI.init(Hub)
 	function Elements.button(parent, text, order, color, width, callback)
 		for _, child in ipairs(parent:GetChildren()) do
 			if child:IsA("TextButton") and child.Text == text then
-				warn("[Elements] Кнопка '" .. text .. "' уже есть")
 				return child
 			end
 		end
 
 		local b = Instance.new("TextButton")
-		b.Size = UDim2.new(0, width or 80, 0, 40)
+		b.Size = UDim2.new(0, width or 70, 0, 32)
 		b.BackgroundColor3 = color or COLORS.AccentDark
 		b.BorderSizePixel = 0
 		b.Text = text
 		b.TextColor3 = COLORS.TextBright
 		b.Font = FONT_BOLD
-		b.TextSize = 13
+		b.TextSize = 12
 		b.LayoutOrder = order or 0
 		b.AutoButtonColor = false
 		b.Active = true
 		b.Parent = parent
-		corner(b)
-		stroke(b)
+		corner(b, 6)
+		stroke(b, COLORS.Stroke, 1)
 		if callback then b.MouseButton1Click:Connect(callback) end
 		return b
 	end
 
 	-- ============================================================
-	-- ============  BUTTON HOLDER  ===============================
+	-- BUTTON HOLDER — компактнее
 	-- ============================================================
 	local holder = Instance.new("Frame")
-	holder.Size = UDim2.new(0, 320, 0, 40)
-	holder.Position = UDim2.new(0, 20, 0, 20)
+	holder.Size = UDim2.new(0, 260, 0, 32)
+	holder.Position = UDim2.new(0, 15, 0, 15)
 	holder.BackgroundTransparency = 1
 	holder.Active = true
 	holder.Parent = gui
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.Padding = UDim.new(0, 10)
+	layout.Padding = UDim.new(0, 6)
 	layout.Parent = holder
 
-	local toggleBtn = Elements.button(holder, "Toggle", 1, Color3.fromRGB(75, 0, 130), 80)
-	local lockBtn   = Elements.button(holder, "Locked", 2, Color3.fromRGB(75, 0, 130), 90)
-	local unloadBtn = Elements.button(holder, "Выгрузить", 3, COLORS.Danger, 100)
+	local toggleBtn = Elements.button(holder, "Toggle", 1, Color3.fromRGB(75, 0, 130), 70)
+	local lockBtn   = Elements.button(holder, "Lock", 2, Color3.fromRGB(75, 0, 130), 70)
+	local unloadBtn = Elements.button(holder, "Unload", 3, COLORS.Danger, 80)
 
 	-- ============================================================
-	-- ============  MENU FRAME (КОМПАКТНО)  ======================
+	-- MENU — КОМПАКТНОЕ 250x260
 	-- ============================================================
 	local menu = Instance.new("Frame")
-	menu.Size = UDim2.new(0, 280, 0, 300)
-	menu.Position = UDim2.new(0, 20, 0, 80)
+	menu.Size = UDim2.new(0, 250, 0, 260)
+	menu.Position = UDim2.new(0, 15, 0, 60)
 	menu.BackgroundColor3 = COLORS.Background
 	menu.BorderSizePixel = 0
 	menu.Visible = false
 	menu.Active = true
 	menu.Parent = gui
-	corner(menu, 10)
-	stroke(menu, COLORS.Accent, 2)
+	corner(menu, 8)
+	stroke(menu, COLORS.Accent, 1)
 
 	-- ============================================================
-	-- ============  PAGES  =======================================
+	-- PAGES
 	-- ============================================================
 	local pages = {}
 	local pagesCount = 3
 	for i = 1, pagesCount do
 		local p = Instance.new("Frame")
 		p.Name = "Page" .. i
-		p.Size = UDim2.new(1, 0, 1, -40)
+		p.Size = UDim2.new(1, 0, 1, -32)
 		p.BackgroundTransparency = 1
 		p.Visible = false
 		p.Parent = menu
 		pages[i] = p
 	end
 
-	-- НАВИГАЦИЯ
+	-- НАВИГАЦИЯ — компактнее
 	local nav = Instance.new("Frame")
-	nav.Size = UDim2.new(1, -20, 0, 30)
-	nav.Position = UDim2.new(0, 10, 1, -35)
+	nav.Size = UDim2.new(1, -16, 0, 24)
+	nav.Position = UDim2.new(0, 8, 1, -28)
 	nav.BackgroundTransparency = 1
 	nav.Parent = menu
 
 	local prev = Instance.new("TextButton")
-	prev.Size = UDim2.new(0, 60, 1, 0)
+	prev.Size = UDim2.new(0, 50, 1, 0)
 	prev.BackgroundColor3 = COLORS.AccentDark
 	prev.BorderSizePixel = 0
 	prev.Text = "◀"
 	prev.TextColor3 = COLORS.TextBright
 	prev.Font = FONT_BOLD
-	prev.TextSize = 18
+	prev.TextSize = 14
 	prev.AutoButtonColor = false
 	prev.Parent = nav
-	corner(prev, 6)
+	corner(prev, 4)
 
 	local next_ = Instance.new("TextButton")
-	next_.Size = UDim2.new(0, 60, 1, 0)
-	next_.Position = UDim2.new(1, -60, 0, 0)
+	next_.Size = UDim2.new(0, 50, 1, 0)
+	next_.Position = UDim2.new(1, -50, 0, 0)
 	next_.BackgroundColor3 = COLORS.AccentDark
 	next_.BorderSizePixel = 0
 	next_.Text = "▶"
 	next_.TextColor3 = COLORS.TextBright
 	next_.Font = FONT_BOLD
-	next_.TextSize = 18
+	next_.TextSize = 14
 	next_.AutoButtonColor = false
 	next_.Parent = nav
-	corner(next_, 6)
+	corner(next_, 4)
 
 	local pageLabel = Instance.new("TextLabel")
-	pageLabel.Size = UDim2.new(1, -140, 1, 0)
-	pageLabel.Position = UDim2.new(0, 70, 0, 0)
+	pageLabel.Size = UDim2.new(1, -120, 1, 0)
+	pageLabel.Position = UDim2.new(0, 60, 0, 0)
 	pageLabel.BackgroundTransparency = 1
 	pageLabel.TextColor3 = COLORS.Text
 	pageLabel.Font = FONT_BOLD
-	pageLabel.TextSize = 14
+	pageLabel.TextSize = 12
 	pageLabel.Parent = nav
 
 	local currentPage = 1
@@ -346,7 +343,7 @@ function UI.init(Hub)
 	showPage(1)
 
 	-- ============================================================
-	-- ============  ПУБЛИЧНОЕ API  ===============================
+	-- ПУБЛИЧНОЕ API
 	-- ============================================================
 	Hub.Page = function(n) return pages[n] end
 	Hub.Elements = Elements
@@ -355,9 +352,7 @@ function UI.init(Hub)
 	Hub.MenuFrame = menu
 	Hub.Pages = pages
 
-	-- ============================================================
-	-- ============  DRAG & BUTTONS  ==============================
-	-- ============================================================
+	-- DRAG
 	makeDraggable(holder, toggleBtn)
 	makeDraggable(holder, lockBtn)
 	makeDraggable(holder, unloadBtn)
@@ -370,19 +365,19 @@ function UI.init(Hub)
 		if open then
 			menu.Position = UDim2.new(
 				holder.Position.X.Scale, holder.Position.X.Offset,
-				holder.Position.Y.Scale, holder.Position.Y.Offset + 50
+				holder.Position.Y.Scale, holder.Position.Y.Offset + 40
 			)
 		end
 	end)
 
 	lockBtn.MouseButton1Click:Connect(function()
 		isLocked = not isLocked
-		lockBtn.Text = isLocked and "Locked" or "Unlocked"
+		lockBtn.Text = isLocked and "Lock" or "Unlk"
 		lockBtn.BackgroundColor3 = isLocked and Color3.fromRGB(75, 0, 130) or Color3.fromRGB(120, 0, 200)
 	end)
 
 	-- ============================================================
-	-- ============  ЗАГРУЗКА МОДУЛЕЙ  ============================
+	-- ЗАГРУЗКА МОДУЛЕЙ
 	-- ============================================================
 	local function loadModule(path)
 		local url = BASE .. path .. "?t=" .. tostring(os.time())
@@ -407,23 +402,11 @@ function UI.init(Hub)
 	}
 
 	print("[UI] ========== ЗАГРУЗКА МОДУЛЕЙ ==========")
-	print("[UI] Hub.Page:", Hub.Page)
-	print("[UI] Hub.Elements:", Hub.Elements)
 
 	for _, path in ipairs(modules) do
-		print("[UI] Загружаю: " .. path)
-
 		local mod = loadModule(path)
-		if not mod then
-			warn("[UI] ❌ " .. path .. " → mod = nil")
-			continue
-		end
-		if type(mod) ~= "table" then
-			warn("[UI] ❌ " .. path .. " → mod не таблица")
-			continue
-		end
-		if not mod.init then
-			warn("[UI] ❌ " .. path .. " → нет .init")
+		if not mod or type(mod) ~= "table" or not mod.init then
+			warn("[UI] ❌ " .. path)
 			continue
 		end
 
@@ -432,7 +415,7 @@ function UI.init(Hub)
 
 		local ok, err = pcall(mod.init, Hub)
 		if ok then
-			print("[UI] ✅ " .. name .. " загружен")
+			print("[UI] ✅ " .. name)
 		else
 			warn("[UI] ❌ " .. name .. " упал: " .. tostring(err))
 		end
@@ -441,38 +424,28 @@ function UI.init(Hub)
 	print("[UI] =========================================")
 
 	-- ============================================================
-	-- ============  UNLOAD  ======================================
+	-- UNLOAD
 	-- ============================================================
 	unloadBtn.MouseButton1Click:Connect(function()
-		print("[UI] Unloading...")
-
 		if Hub.Modules.save and Hub.Modules.save.cleanup then
 			pcall(Hub.Modules.save.cleanup)
 		end
-
 		for name, mod in pairs(Hub.Modules) do
-			if name ~= "save"
-				and type(mod) == "table"
-				and mod.cleanup
-			then
+			if name ~= "save" and type(mod) == "table" and mod.cleanup then
 				pcall(mod.cleanup)
 			end
 		end
-
 		for _, sw in pairs(Hub.Toggles) do
 			pcall(function() sw.set(false) end)
 		end
-
 		for _, c in pairs(Hub.Connections) do
 			pcall(function() c:Disconnect() end)
 		end
 		Hub.Connections = {}
-
 		if gui and gui.Parent then gui:Destroy() end
 		print("[HUB] Unloaded")
 	end)
 
-	print("[UI] Готово")
 	return Hub
 end
 
