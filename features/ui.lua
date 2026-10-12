@@ -374,6 +374,7 @@ function UI.init(Hub)
 	local modules = {
 		"features/esp.lua",
 		"features/movement.lua",
+		"features/library.lua",
 		"features/bypass.lua",
 		"features/notify.lua",
 		"features/misc.lua",
