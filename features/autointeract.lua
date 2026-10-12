@@ -19,13 +19,14 @@ local aiState = {
 }
 
 -- ============================================================
--- ЖЁСТКИЙ ИГНОР ПО НАЧАЛУ ИМЕНИ (case-insensitive)
+-- ЧЁРНЫЙ СПИСОК — если имя НАЧИНАЕТСЯ на одну из строк — НЕ кликаем
+-- (case-insensitive)
 -- ============================================================
-local IGNORE_STARTS_WITH = {
-	"painting",       -- Painting_1, Painting_2, PaintingABC
-	"paintings",      -- PaintingsContainer
-	"regal",
-	"wardrobe",
+local BLACKLIST_STARTS_WITH = {
+	"painting",              -- Painting_1, Painting_2, Paintings*
+	"paintings",
+	"regal",                 -- Regal, RegalDoor
+	"wardrobe",              -- Wardrobe, Wardrobe-FOOLS26
 	"backdoor_wardrobe",
 	"retro_wardrobe",
 	"rooms_locker",
@@ -51,16 +52,8 @@ local IGNORE_STARTS_WITH = {
 	"wax_door",
 }
 
--- ============================================================
--- WHITELIST — ВСЕГДА кликать, даже если в игноре
--- ============================================================
-local ALWAYS_CLICK_STARTS_WITH = {
-	"drawercontainer",     -- ← ГЛАВНОЕ: всегда кликаем
-	"drawer",
-}
-
--- Точные имена prompt'ов (игнор)
-local IGNORE_PROMPT_NAMES = {
+-- Точные имена prompt'ов которые игнорим
+local BLACKLIST_PROMPT_NAMES = {
 	HidePrompt = true,
 	ClimbPrompt = true,
 	RiftPrompt = true,
@@ -88,64 +81,28 @@ local function startsWithAny(name, list)
 	return false
 end
 
--- Проверка: есть ли в цепочке родителей whitelist-имя
-local function isWhitelisted(prompt)
-	-- сам prompt
-	if startsWithAny(prompt.Name, ALWAYS_CLICK_STARTS_WITH) then
-		return true
-	end
-
-	-- цепочка родителей
-	local current = prompt.Parent
-	local depth = 0
-	while current and depth < 20 do
-		if startsWithAny(current.Name, ALWAYS_CLICK_STARTS_WITH) then
-			return true
-		end
-		current = current.Parent
-		depth = depth + 1
-	end
-
-	return false
-end
-
-local function isIgnored(prompt)
+local function isBlacklisted(prompt)
 	-- 1. точное имя prompt'а
-	if IGNORE_PROMPT_NAMES[prompt.Name] then return true end
+	if BLACKLIST_PROMPT_NAMES[prompt.Name] then return true end
 
-	-- 2. fake prompt (для Infinite Items)
+	-- 2. fake prompt (для Infinite Items) — не трогаем
 	if prompt:GetAttribute("FakePrompt") then return true end
 
-	-- 3. имя самого prompt'а начинается с игнора
-	if startsWithAny(prompt.Name, IGNORE_STARTS_WITH) then return true end
+	-- 3. имя prompt'а начинается с чёрного префикса
+	if startsWithAny(prompt.Name, BLACKLIST_STARTS_WITH) then return true end
 
-	-- 4. вся цепочка родителей вверх
+	-- 4. вся цепочка родителей вверх (до 20 уровней)
 	local current = prompt.Parent
 	local depth = 0
 	while current and depth < 20 do
-		if startsWithAny(current.Name, IGNORE_STARTS_WITH) then return true end
-		if IGNORE_PROMPT_NAMES[current.Name] then return true end
+		if startsWithAny(current.Name, BLACKLIST_STARTS_WITH) then return true end
+		if BLACKLIST_PROMPT_NAMES[current.Name] then return true end
 
 		current = current.Parent
 		depth = depth + 1
 	end
 
 	return false
-end
-
--- ГЛАВНАЯ проверка: должен ли активироваться этот prompt
-local function shouldClick(prompt)
-	-- Whitelist имеет высший приоритет
-	if isWhitelisted(prompt) then
-		return true
-	end
-
-	-- Иначе проверяем игнор
-	if isIgnored(prompt) then
-		return false
-	end
-
-	return true
 end
 
 local function firePrompt(prompt)
@@ -176,30 +133,26 @@ local function runLoop()
 
 	if now - aiState.lastFire < 0.05 then return end
 
-	-- собираем кандидатов
-	local whitelisted = {}
-	local normal = {}
+	-- собираем кандидатов в радиусе
+	local candidates = {}
 
 	for _, prompt in ipairs(workspace:GetDescendants()) do
 		if prompt:IsA("ProximityPrompt") and prompt.Enabled then
-			local parent = prompt.Parent
-			if parent then
-				local pos
-				if parent:IsA("BasePart") then
-					pos = parent.Position
-				elseif parent:IsA("Model") then
-					local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
-					pos = pp and pp.Position
-				end
+			if not isBlacklisted(prompt) then
+				local parent = prompt.Parent
+				if parent then
+					local pos
+					if parent:IsA("BasePart") then
+						pos = parent.Position
+					elseif parent:IsA("Model") then
+						local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
+						pos = pp and pp.Position
+					end
 
-				if pos then
-					local dist = (pos - myPos).Magnitude
-					if dist <= aiState.distance then
-						-- whitelist — отдельная очередь (высший приоритет)
-						if isWhitelisted(prompt) then
-							table.insert(whitelisted, { prompt = prompt, dist = dist })
-						elseif not isIgnored(prompt) then
-							table.insert(normal, { prompt = prompt, dist = dist })
+					if pos then
+						local dist = (pos - myPos).Magnitude
+						if dist <= aiState.distance then
+							table.insert(candidates, { prompt = prompt, dist = dist })
 						end
 					end
 				end
@@ -207,23 +160,11 @@ local function runLoop()
 		end
 	end
 
-	-- сортируем по дистанции (ближайшие первыми)
-	table.sort(whitelisted, function(a, b) return a.dist < b.dist end)
-	table.sort(normal, function(a, b) return a.dist < b.dist end)
+	-- сортируем по дистанции
+	table.sort(candidates, function(a, b) return a.dist < b.dist end)
 
-	-- 1. сначала пробуем whitelist
-	for _, c in ipairs(whitelisted) do
-		local lastUse = aiState.cooldown[c.prompt] or 0
-		if now - lastUse > 0.5 then
-			aiState.cooldown[c.prompt] = now
-			firePrompt(c.prompt)
-			aiState.lastFire = now
-			return
-		end
-	end
-
-	-- 2. потом обычные
-	for _, c in ipairs(normal) do
+	-- активируем ближайший доступный
+	for _, c in ipairs(candidates) do
 		local lastUse = aiState.cooldown[c.prompt] or 0
 		if now - lastUse > 0.5 then
 			aiState.cooldown[c.prompt] = now
@@ -271,15 +212,15 @@ local function buildUI()
 	end)
 
 	Elements.label(page,
-		"Ignores: Painting*, Regal*, Wardrobe*...",
+		"Blacklist: Painting*, Regal*, Wardrobe*, Hide...",
 		206,
-		{ color = Color3.fromRGB(150, 150, 150), size = 9,
+		{ color = Color3.fromRGB(255, 150, 150), size = 9,
 		  font = Enum.Font.Gotham })
 
 	Elements.label(page,
-		"Always clicks: DrawerContainer*",
+		"Кликает на всё остальное",
 		222,
-		{ color = Color3.fromRGB(100, 255, 100), size = 9,
+		{ color = Color3.fromRGB(150, 255, 150), size = 9,
 		  font = Enum.Font.Gotham })
 end
 
