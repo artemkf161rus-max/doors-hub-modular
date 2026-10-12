@@ -1,6 +1,5 @@
 -- ============================================================
 -- ============  MODULE: AUTO INTERACT  =======================
--- ============  (Abysall-style, all prompts)  ================
 -- ============================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -19,7 +18,7 @@ local aiState = {
 }
 
 -- ============================================================
--- BLACKLIST (промпты которые НЕ трогаем)
+-- BLACKLIST (что НЕ трогаем)
 -- ============================================================
 local AutoInteractBlacklist = {
 	HidePrompt = true,
@@ -38,7 +37,16 @@ local AutoInteractBlacklist = {
 }
 
 -- ============================================================
--- ХЕЛПЕРЫ (как в Abysall)
+-- WHITELIST (всегда активируем, игнорируя все проверки)
+-- Регистр НЕ важен — сравнение через string.lower()
+-- ============================================================
+local ALWAYS_CLICK = {
+	"DrawerContainer",
+	"Drawer",
+}
+
+-- ============================================================
+-- ХЕЛПЕРЫ
 -- ============================================================
 local function HasItem(name, onlyCharacter)
 	local char = player.Character
@@ -64,8 +72,35 @@ local function FirePrompt(prompt)
 	end
 end
 
+local function startsWithAny(name, list)
+	if not name then return false end
+	local lower = string.lower(name)
+	for _, prefix in ipairs(list) do
+		if string.sub(lower, 1, #prefix) == string.lower(prefix) then
+			return true
+		end
+	end
+	return false
+end
+
+local function isWhitelistedPrompt(prompt)
+	-- сам prompt
+	if startsWithAny(prompt.Name, ALWAYS_CLICK) then return true end
+
+	-- вся цепочка родителей (до 20 уровней)
+	local current = prompt.Parent
+	local depth = 0
+	while current and depth < 20 do
+		if startsWithAny(current.Name, ALWAYS_CLICK) then return true end
+		current = current.Parent
+		depth = depth + 1
+	end
+
+	return false
+end
+
 -- ============================================================
--- ГЛАВНАЯ ФУНКЦИЯ (порт из Abysall)
+-- ГЛАВНАЯ ФУНКЦИЯ
 -- ============================================================
 local TriggerDebounce = false
 
@@ -73,15 +108,22 @@ local function TriggerPrompt(Prompt)
 	if not Prompt or not Prompt.Parent then return end
 	if AutoInteractBlacklist[Prompt.Name] then return end
 	if TriggerDebounce then return end
-
-	-- fake prompt — не наш (для Infinite Items)
 	if Prompt:GetAttribute("FakePrompt") then return end
 
 	local char = player.Character
 	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
-	-- если у игрока уже есть предмет с полной прочностью — не тратим
+	-- ⭐ WHITELIST — кликаем сразу, игнорируя все проверки
+	if isWhitelistedPrompt(Prompt) then
+		FirePrompt(Prompt)
+		TriggerDebounce = true
+		task.wait()
+		TriggerDebounce = false
+		return
+	end
+
+	-- ============ ПРОВЕРКА ПРОЧНОСТИ ============
 	local ParentItem = HasItem(Prompt.Parent.Name)
 	if ParentItem and ParentItem:GetAttribute("Durability") and ParentItem:GetAttribute("DurabilityMax")
 		and ParentItem:GetAttribute("Durability") >= ParentItem:GetAttribute("DurabilityMax")
@@ -99,7 +141,6 @@ local function TriggerPrompt(Prompt)
 			and Prompt.Name == "ActivateEventPrompt")
 
 	if IsLockPrompt then
-		-- проверка что есть ключ
 		local KeyItems = {
 			"Key", "GeneratorFuse", "KeyBackdoor", "KeyElectrical",
 			"KeyIron", "Lockpick", "SkeletonKey", "Shears", "Multitool",
@@ -115,8 +156,7 @@ local function TriggerPrompt(Prompt)
 		if not HasKey then return end
 	end
 
-	-- ============ СПЕЦИФИЧНЫЕ ПРОВЕРКИ ============
-	-- Vines/Cellar — нужны ножницы или мультитул
+	-- ============ VINES / CELLAR ============
 	if Prompt.Parent.Name == "CuttableVines"
 		and not HasItem("Shears", true)
 		and not HasItem("Multitool", true) then return end
@@ -127,10 +167,9 @@ local function TriggerPrompt(Prompt)
 		and not HasItem("Shears", true)
 		and not HasItem("Multitool", true) then return end
 
-	-- SkullLock — нужен SkeletonKey
+	-- ============ SKULL / LOCKS ============
 	if Prompt.Parent.Name == "SkullLock" and not HasItem("SkeletonKey", true) then return end
 
-	-- Lock1/Lock2 — нужен Lockpick или Multitool
 	if Prompt.Parent.Name == "Lock1"
 		and not HasItem("Lockpick", true)
 		and not HasItem("Multitool", true) then return end
@@ -138,21 +177,19 @@ local function TriggerPrompt(Prompt)
 		and not HasItem("Lockpick", true)
 		and not HasItem("Multitool", true) then return end
 
-	-- если держим Shears — не используем на замках (кроме vine)
 	if HasItem("Shears", true) and IsLockPrompt
 		and Prompt.Parent.Name ~= "CuttableVines"
 		and Prompt.Parent.Name ~= "Chest_Vine"
 		and Prompt.Parent.Name ~= "Cellar" then return end
 
-	-- ============ ОБЩИЕ ПРОВЕРКИ ============
-	-- уже есть ключ — не подбираем второй
+	-- ============ KEY ITEMS ============
 	if Prompt.Parent.Name == "KeyObtain" and (HasItem("Key") or HasItem("KeyBackdoor")) then return end
 	if Prompt.Parent.Name == "ElectricalKeyObtain" and HasItem("KeyElectrical") then return end
 
-	-- Lever закрытия — не трогаем
+	-- ============ LEVERS ============
 	if Prompt.Parent.Name == "LeverForGate" and Prompt:GetAttribute("Interactions") then return end
 
-	-- фейковые двери — не трогаем
+	-- ============ FAKE DOORS ============
 	if Prompt.Parent.Parent and (Prompt.Parent.Parent.Name == "DoorFake"
 		or Prompt.Parent.Parent.Name == "FakeDoor") then return end
 
@@ -165,22 +202,19 @@ local function TriggerPrompt(Prompt)
 end
 
 -- ============================================================
--- ОСНОВНОЙ ЦИКЛ (как в Abysall)
+-- ОСНОВНОЙ ЦИКЛ
 -- ============================================================
 local function runLoop()
 	local char = player.Character
 	if not char then return end
-
 	local humanoid = char:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
 	local now = tick()
 	if now - aiState.lastFire < 1/60 then return end
 
-	-- перебираем ВСЕ ProximityPrompt в workspace
 	for _, prompt in ipairs(workspace:GetDescendants()) do
 		if prompt:IsA("ProximityPrompt") and prompt.Enabled then
-			-- получаем позицию родителя
 			local parent = prompt.Parent
 			if parent and (parent:IsA("BasePart") or parent:IsA("Model")) then
 				local distance
@@ -190,7 +224,6 @@ local function runLoop()
 					distance = player:DistanceFromCharacter(parent:GetPivot().Position)
 				end
 
-				-- проверяем дистанцию
 				if distance <= prompt.MaxActivationDistance then
 					task.spawn(TriggerPrompt, prompt)
 				end
@@ -228,23 +261,11 @@ local function buildUI()
 		end
 	end)
 
-	Elements.label(page,
-		"Активирует все prompts в радиусе",
-		154,
-		{ color = Color3.fromRGB(150, 255, 150), size = 9,
-		  font = Enum.Font.Gotham })
+	Elements.label(page, "Whitelist: DrawerContainer*, Drawer*", 154,
+		{ color = Color3.fromRGB(100, 255, 100), size = 9, font = Enum.Font.Gotham })
 
-	Elements.label(page,
-		"Blacklist: Hide/Climb/Rift/Donate/Dialogue...",
-		170,
-		{ color = Color3.fromRGB(150, 150, 150), size = 9,
-		  font = Enum.Font.Gotham })
-
-	Elements.label(page,
-		"Проверки: ключи, прочность, lock prompts",
-		186,
-		{ color = Color3.fromRGB(150, 150, 150), size = 9,
-		  font = Enum.Font.Gotham })
+	Elements.label(page, "Blacklist: Hide/Climb/Rift/Donate...", 170,
+		{ color = Color3.fromRGB(255, 150, 150), size = 9, font = Enum.Font.Gotham })
 end
 
 -- ============================================================
