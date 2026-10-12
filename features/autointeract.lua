@@ -3,7 +3,6 @@
 -- ============================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local ProximityPromptService = game:GetService("ProximityPromptService")
 local player = Players.LocalPlayer
 
 local AutoInteract = {}
@@ -15,10 +14,11 @@ local aiState = {
 	enabled = false,
 	loop = nil,
 	lastFire = 0,
+	whitelistRange = 15,  -- радиус для whitelist
 }
 
 -- ============================================================
--- BLACKLIST (что НЕ трогаем)
+-- BLACKLIST
 -- ============================================================
 local AutoInteractBlacklist = {
 	HidePrompt = true,
@@ -37,8 +37,7 @@ local AutoInteractBlacklist = {
 }
 
 -- ============================================================
--- WHITELIST (всегда активируем, игнорируя все проверки)
--- Регистр НЕ важен — сравнение через string.lower()
+-- WHITELIST
 -- ============================================================
 local ALWAYS_CLICK = {
 	"DrawerContainer",
@@ -84,10 +83,7 @@ local function startsWithAny(name, list)
 end
 
 local function isWhitelistedPrompt(prompt)
-	-- сам prompt
 	if startsWithAny(prompt.Name, ALWAYS_CLICK) then return true end
-
-	-- вся цепочка родителей (до 20 уровней)
 	local current = prompt.Parent
 	local depth = 0
 	while current and depth < 20 do
@@ -95,8 +91,19 @@ local function isWhitelistedPrompt(prompt)
 		current = current.Parent
 		depth = depth + 1
 	end
-
 	return false
+end
+
+local function getPromptPos(prompt)
+	local parent = prompt.Parent
+	if not parent then return nil end
+	if parent:IsA("BasePart") then
+		return parent.Position
+	elseif parent:IsA("Model") then
+		local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
+		return pp and pp.Position
+	end
+	return nil
 end
 
 -- ============================================================
@@ -114,7 +121,7 @@ local function TriggerPrompt(Prompt)
 	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
-	-- ⭐ WHITELIST — кликаем сразу, игнорируя все проверки
+	-- WHITELIST — активируем сразу
 	if isWhitelistedPrompt(Prompt) then
 		FirePrompt(Prompt)
 		TriggerDebounce = true
@@ -123,13 +130,13 @@ local function TriggerPrompt(Prompt)
 		return
 	end
 
-	-- ============ ПРОВЕРКА ПРОЧНОСТИ ============
+	-- прочность
 	local ParentItem = HasItem(Prompt.Parent.Name)
 	if ParentItem and ParentItem:GetAttribute("Durability") and ParentItem:GetAttribute("DurabilityMax")
 		and ParentItem:GetAttribute("Durability") >= ParentItem:GetAttribute("DurabilityMax")
 	then return end
 
-	-- ============ LOCK PROMPTS ============
+	-- lock prompts
 	local LockPromptNames = {
 		UnlockPrompt = true, SkullPrompt = true, LockPrompt = true,
 		ThingToEnable = true, FusesPrompt = true,
@@ -156,7 +163,6 @@ local function TriggerPrompt(Prompt)
 		if not HasKey then return end
 	end
 
-	-- ============ VINES / CELLAR ============
 	if Prompt.Parent.Name == "CuttableVines"
 		and not HasItem("Shears", true)
 		and not HasItem("Multitool", true) then return end
@@ -167,7 +173,6 @@ local function TriggerPrompt(Prompt)
 		and not HasItem("Shears", true)
 		and not HasItem("Multitool", true) then return end
 
-	-- ============ SKULL / LOCKS ============
 	if Prompt.Parent.Name == "SkullLock" and not HasItem("SkeletonKey", true) then return end
 
 	if Prompt.Parent.Name == "Lock1"
@@ -182,18 +187,14 @@ local function TriggerPrompt(Prompt)
 		and Prompt.Parent.Name ~= "Chest_Vine"
 		and Prompt.Parent.Name ~= "Cellar" then return end
 
-	-- ============ KEY ITEMS ============
 	if Prompt.Parent.Name == "KeyObtain" and (HasItem("Key") or HasItem("KeyBackdoor")) then return end
 	if Prompt.Parent.Name == "ElectricalKeyObtain" and HasItem("KeyElectrical") then return end
 
-	-- ============ LEVERS ============
 	if Prompt.Parent.Name == "LeverForGate" and Prompt:GetAttribute("Interactions") then return end
 
-	-- ============ FAKE DOORS ============
 	if Prompt.Parent.Parent and (Prompt.Parent.Parent.Name == "DoorFake"
 		or Prompt.Parent.Parent.Name == "FakeDoor") then return end
 
-	-- ============ АКТИВИРУЕМ ============
 	FirePrompt(Prompt)
 
 	TriggerDebounce = true
@@ -213,8 +214,21 @@ local function runLoop()
 	local now = tick()
 	if now - aiState.lastFire < 1/60 then return end
 
+	-- ⭐ ШАГ 1: WHITELIST — без проверок Enabled/Distance
 	for _, prompt in ipairs(workspace:GetDescendants()) do
-		if prompt:IsA("ProximityPrompt") and prompt.Enabled then
+		if prompt:IsA("ProximityPrompt") and isWhitelistedPrompt(prompt) then
+			local pos = getPromptPos(prompt)
+			if pos and player:DistanceFromCharacter(pos) < aiState.whitelistRange then
+				FirePrompt(prompt)
+				aiState.lastFire = now
+				return
+			end
+		end
+	end
+
+	-- ШАГ 2: обычные prompts
+	for _, prompt in ipairs(workspace:GetDescendants()) do
+		if prompt:IsA("ProximityPrompt") and prompt.Enabled and not isWhitelistedPrompt(prompt) then
 			local parent = prompt.Parent
 			if parent and (parent:IsA("BasePart") or parent:IsA("Model")) then
 				local distance
@@ -264,7 +278,10 @@ local function buildUI()
 	Elements.label(page, "Whitelist: DrawerContainer*, Drawer*", 154,
 		{ color = Color3.fromRGB(100, 255, 100), size = 9, font = Enum.Font.Gotham })
 
-	Elements.label(page, "Blacklist: Hide/Climb/Rift/Donate...", 170,
+	Elements.label(page, "Whitelist range: 15 studs", 170,
+		{ color = Color3.fromRGB(100, 255, 100), size = 9, font = Enum.Font.Gotham })
+
+	Elements.label(page, "Blacklist: Hide/Climb/Rift/Donate...", 186,
 		{ color = Color3.fromRGB(255, 150, 150), size = 9, font = Enum.Font.Gotham })
 end
 
