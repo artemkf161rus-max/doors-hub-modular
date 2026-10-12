@@ -403,7 +403,6 @@ function UI.init(Hub)
 		"features/bypass.lua",
 		"features/notify.lua",
 		"features/misc.lua",
-		"features/autointeract.lua",
 	}
 
 	print("[UI] ========== ЗАГРУЗКА МОДУЛЕЙ ==========")
