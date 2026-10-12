@@ -1,5 +1,5 @@
 -- ============================================================
--- ============  MODULE: AUTO INTERACT  =======================
+-- ============  MODULE: AUTO INTERACT (NO LIMIT)  ============
 -- ============================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -13,12 +13,10 @@ local connections = {}
 local aiState = {
 	enabled = false,
 	loop = nil,
-	lastFire = 0,
-	whitelistRange = 25,
 }
 
 -- ============================================================
--- BLACKLIST
+-- BLACKLIST (не трогаем)
 -- ============================================================
 local AutoInteractBlacklist = {
 	HidePrompt = true,
@@ -34,14 +32,6 @@ local AutoInteractBlacklist = {
 	ToolEventPrompt = true,
 	Prompt = true,
 	PropPrompt = true,
-}
-
--- ============================================================
--- WHITELIST
--- ============================================================
-local ALWAYS_CLICK = {
-	"DrawerContainer",
-	"Drawer",
 }
 
 -- ============================================================
@@ -71,27 +61,24 @@ local function FirePrompt(prompt)
 	end
 end
 
-local function startsWithAny(name, list)
-	if not name then return false end
-	local lower = string.lower(name)
-	for _, prefix in ipairs(list) do
-		if string.sub(lower, 1, #prefix) == string.lower(prefix) then
-			return true
-		end
-	end
-	return false
-end
+-- жёсткая активация — временно включает/раздувает
+local function FirePromptAggressive(prompt)
+	if not prompt or not prompt.Parent then return end
 
-local function isWhitelistedPrompt(prompt)
-	if startsWithAny(prompt.Name, ALWAYS_CLICK) then return true end
-	local current = prompt.Parent
-	local depth = 0
-	while current and depth < 20 do
-		if startsWithAny(current.Name, ALWAYS_CLICK) then return true end
-		current = current.Parent
-		depth = depth + 1
-	end
-	return false
+	local oldDist = prompt.MaxActivationDistance
+	local oldEnabled = prompt.Enabled
+
+	pcall(function()
+		prompt.MaxActivationDistance = 999
+		prompt.Enabled = true
+	end)
+
+	FirePrompt(prompt)
+
+	pcall(function()
+		prompt.MaxActivationDistance = oldDist
+		prompt.Enabled = oldEnabled
+	end)
 end
 
 local function getPromptPos(prompt)
@@ -107,34 +94,27 @@ local function getPromptPos(prompt)
 end
 
 -- ============================================================
--- ГЛАВНАЯ ФУНКЦИЯ
+-- ОСНОВНАЯ АКТИВАЦИЯ
 -- ============================================================
 local TriggerDebounce = false
 
-local function TriggerPrompt(Prompt)
+local function TriggerPrompt(Prompt, distance)
 	if not Prompt or not Prompt.Parent then return end
 	if AutoInteractBlacklist[Prompt.Name] then return end
-	if TriggerDebounce then return end
 	if Prompt:GetAttribute("FakePrompt") then return end
+	if TriggerDebounce then return end
 
 	local char = player.Character
 	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
-	-- WHITELIST — активируем сразу
-	if isWhitelistedPrompt(Prompt) then
-		FirePrompt(Prompt)
-		TriggerDebounce = true
-		task.wait()
-		TriggerDebounce = false
-		return
-	end
-
+	-- прочность
 	local ParentItem = HasItem(Prompt.Parent.Name)
 	if ParentItem and ParentItem:GetAttribute("Durability") and ParentItem:GetAttribute("DurabilityMax")
 		and ParentItem:GetAttribute("Durability") >= ParentItem:GetAttribute("DurabilityMax")
 	then return end
 
+	-- lock prompts
 	local LockPromptNames = {
 		UnlockPrompt = true, SkullPrompt = true, LockPrompt = true,
 		ThingToEnable = true, FusesPrompt = true,
@@ -193,15 +173,12 @@ local function TriggerPrompt(Prompt)
 	if Prompt.Parent.Parent and (Prompt.Parent.Parent.Name == "DoorFake"
 		or Prompt.Parent.Parent.Name == "FakeDoor") then return end
 
+	-- ============ АКТИВИРУЕМ ============
 	FirePrompt(Prompt)
-
-	TriggerDebounce = true
-	task.wait()
-	TriggerDebounce = false
 end
 
 -- ============================================================
--- ОСНОВНОЙ ЦИКЛ
+-- ОСНОВНОЙ ЦИКЛ — БЕЗ ЛИМИТА
 -- ============================================================
 local function runLoop()
 	local char = player.Character
@@ -209,40 +186,22 @@ local function runLoop()
 	local humanoid = char:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
-	local now = tick()
-	if now - aiState.lastFire < 1/60 then return end
-
-	-- ⭐ ШАГ 1: WHITELIST — активируем ВСЕ подряд
+	-- пробегаем ВСЕ prompts подряд и активируем КАЖДЫЙ
 	for _, prompt in ipairs(workspace:GetDescendants()) do
-		if prompt:IsA("ProximityPrompt") and isWhitelistedPrompt(prompt) then
-			local pos = getPromptPos(prompt)
-			if pos and player:DistanceFromCharacter(pos) < aiState.whitelistRange then
-				FirePrompt(prompt)
-				-- НЕ return — продолжаем на следующий
-			end
-		end
-	end
-
-	-- ШАГ 2: обычные prompts
-	for _, prompt in ipairs(workspace:GetDescendants()) do
-		if prompt:IsA("ProximityPrompt") and prompt.Enabled and not isWhitelistedPrompt(prompt) then
-			local parent = prompt.Parent
-			if parent and (parent:IsA("BasePart") or parent:IsA("Model")) then
-				local distance
-				if parent:IsA("BasePart") then
-					distance = player:DistanceFromCharacter(parent.Position)
-				else
-					distance = player:DistanceFromCharacter(parent:GetPivot().Position)
-				end
-
-				if distance <= prompt.MaxActivationDistance then
-					task.spawn(TriggerPrompt, prompt)
+		if prompt:IsA("ProximityPrompt") and prompt.Enabled then
+			if not AutoInteractBlacklist[prompt.Name] then
+				local pos = getPromptPos(prompt)
+				if pos then
+					local dist = player:DistanceFromCharacter(pos)
+					-- проверяем что в радиусе активации
+					if dist <= math.max(prompt.MaxActivationDistance, 15) then
+						-- активируем БЕЗ ОГРАНИЧЕНИЙ
+						pcall(TriggerPrompt, prompt, dist)
+					end
 				end
 			end
 		end
 	end
-
-	aiState.lastFire = now
 end
 
 -- ============================================================
@@ -266,26 +225,20 @@ local function buildUI()
 				end)
 				table.insert(connections, aiState.loop)
 			end
-			print("[AUTO INTERACT] ON")
+			print("[AUTO INTERACT] ON (NO LIMIT)")
 		else
 			print("[AUTO INTERACT] OFF")
 		end
 	end)
 
-	Elements.label(page, "Whitelist Range (10-50)", 154)
-	local rangeVal = Elements.label(page, "Range: 25", 170,
-		{ color = Color3.fromRGB(255, 255, 255), size = 10 })
-
-	Elements.slider(page, 186, 10, 50, 25, function(v)
-		aiState.whitelistRange = math.floor(v)
-		rangeVal.Text = "Range: " .. aiState.whitelistRange
-	end)
-
-	Elements.label(page, "Whitelist: DrawerContainer*, Drawer*", 206,
+	Elements.label(page, "Активирует ВСЕ prompts подряд", 154,
 		{ color = Color3.fromRGB(100, 255, 100), size = 9, font = Enum.Font.Gotham })
 
-	Elements.label(page, "Активирует ВСЕ слоты подряд", 222,
+	Elements.label(page, "Без лимита — 2-6-10 сразу", 170,
 		{ color = Color3.fromRGB(100, 255, 100), size = 9, font = Enum.Font.Gotham })
+
+	Elements.label(page, "Blacklist: Hide/Climb/Rift/Donate...", 186,
+		{ color = Color3.fromRGB(255, 150, 150), size = 9, font = Enum.Font.Gotham })
 end
 
 -- ============================================================
