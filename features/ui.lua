@@ -90,7 +90,7 @@ function UI.init(Hub)
 	end
 
 	-- ============================================================
-	-- ELEMENTS — уменьшены размеры
+	-- ELEMENTS
 	-- ============================================================
 	local Elements = {}
 
@@ -243,7 +243,7 @@ function UI.init(Hub)
 	end
 
 	-- ============================================================
-	-- BUTTON HOLDER — компактнее
+	-- BUTTON HOLDER
 	-- ============================================================
 	local holder = Instance.new("Frame")
 	holder.Size = UDim2.new(0, 260, 0, 32)
@@ -261,7 +261,7 @@ function UI.init(Hub)
 	local unloadBtn = Elements.button(holder, "Unload", 3, COLORS.Danger, 80)
 
 	-- ============================================================
-	-- MENU — КОМПАКТНОЕ 250x260
+	-- MENU
 	-- ============================================================
 	local menu = Instance.new("Frame")
 	menu.Size = UDim2.new(0, 250, 0, 260)
@@ -289,7 +289,6 @@ function UI.init(Hub)
 		pages[i] = p
 	end
 
-	-- НАВИГАЦИЯ — компактнее
 	local nav = Instance.new("Frame")
 	nav.Size = UDim2.new(1, -16, 0, 24)
 	nav.Position = UDim2.new(0, 8, 1, -28)
