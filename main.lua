@@ -2,9 +2,13 @@
 -- ================  MAIN.LUA  ================================
 -- ============================================================
 local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
 local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 
 local BASE = "https://raw.githubusercontent.com/artemkf161rus-max/doors-hub-modular/refs/heads/main/"
+
+-- ⏱ Старт замера времени
+local LoadStart = tick()
 
 -- ============================================================
 -- ============  PRE-CLEANUP (важно!)  ========================
@@ -12,10 +16,8 @@ local BASE = "https://raw.githubusercontent.com/artemkf161rus-max/doors-hub-modu
 do
 	print("[MAIN] PRE-CLEANUP запущен")
 
-	-- 1. Вызываем cleanup() у старого Hub, если он был
 	local oldHub = getgenv().Hub
 	if oldHub then
-		-- cleanup у всех модулей
 		if oldHub.Modules then
 			for name, mod in pairs(oldHub.Modules) do
 				if type(mod) == "table" and mod.cleanup then
@@ -29,7 +31,6 @@ do
 			end
 		end
 
-		-- отключаем общие коннекты
 		if oldHub.Connections then
 			for _, c in ipairs(oldHub.Connections) do
 				pcall(function() c:Disconnect() end)
@@ -37,7 +38,6 @@ do
 			oldHub.Connections = {}
 		end
 
-		-- выключаем все тоглы
 		if oldHub.Toggles then
 			for _, sw in pairs(oldHub.Toggles) do
 				if type(sw) == "table" and sw.set then
@@ -49,7 +49,6 @@ do
 	end
 	getgenv().Hub = nil
 
-	-- 2. Удаляем старые ScreenGui
 	local removeNames = {
 		MenuUI = true,
 		HubNotifications = true,
@@ -64,7 +63,6 @@ do
 
 	print("[MAIN] PRE-CLEANUP завершён")
 end
--- ============================================================
 
 -- ============================================================
 -- ============  ЗАГРУЗЧИК  ===================================
@@ -84,6 +82,25 @@ local function load(path, addTimestamp)
 		return nil
 	end
 	return result
+end
+
+-- ============================================================
+-- ============  ХЕЛПЕР — Roblox Notification  ================
+-- ============================================================
+local function SendNotification(title, text, duration)
+	task.spawn(function()
+		local ok, err = pcall(function()
+			StarterGui:SetCore("SendNotification", {
+				Title = title or "Hub",
+				Text = text or "",
+				Duration = duration or 5,
+				Icon = "rbxassetid://6023426923",
+			})
+		end)
+		if not ok then
+			warn("[MAIN] SendNotification failed: " .. tostring(err))
+		end
+	end)
 end
 
 -- ============================================================
@@ -116,8 +133,7 @@ getgenv().Hub = Hub
 -- ============================================================
 -- ============  ЗАГРУЗКА UI  =================================
 -- ============================================================
--- ui.lua сам подтянет esp / movement / library / bypass / notify / misc
-local UI = load("features/ui.lua", true)  -- true = добавить ?t= для обхода кэша
+local UI = load("features/ui.lua", true)
 if UI and type(UI) == "table" and UI.init then
 	local ok, err = pcall(UI.init, Hub)
 	if ok then
@@ -128,5 +144,22 @@ if UI and type(UI) == "table" and UI.init then
 else
 	warn("[MAIN] ui.lua не вернул init()")
 end
+
+-- ============================================================
+-- ============  ВРЕМЯ ЗАГРУЗКИ + УВЕДОМЛЕНИЕ  ================
+-- ============================================================
+local LoadTime = tick() - LoadStart
+local LoadTimeMs = math.floor(LoadTime * 1000) / 1000
+
+-- выводим в консоль
+print("[MAIN] Загружено за " .. LoadTimeMs .. " сек")
+
+-- показываем встроенное уведомление Roblox
+task.wait(0.5)  -- ждём чтобы Core успел инициализироваться
+SendNotification(
+	"✦ Doors Hub ✦",
+	"Загружено за " .. LoadTimeMs .. " сек",
+	5
+)
 
 print("[MAIN] Готово")
