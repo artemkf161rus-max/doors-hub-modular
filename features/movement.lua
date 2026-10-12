@@ -5,6 +5,7 @@ local player = Players.LocalPlayer
 
 local Movement = {}
 
+-- ==================== STATE ====================
 local Config
 local Toggles
 local Hub
@@ -13,9 +14,26 @@ local page
 
 local connections = {}
 
-local speedState = { enabled = false, value = 16, bv = nil, loop = nil }
-local fovState   = { enabled = false, value = 70, loop = nil }
-local fbState    = { enabled = false, saved = {} }
+-- speed
+local speedState = {
+	enabled = false,
+	value = 16,
+	bv = nil,
+	loop = nil,
+}
+
+-- fov
+local fovState = {
+	enabled = false,
+	value = 70,
+	loop = nil,
+}
+
+-- fullbright
+local fbState = {
+	enabled = false,
+	saved = {},
+}
 
 local function track(conn)
 	table.insert(connections, conn)
@@ -26,8 +44,13 @@ end
 -- SPEED
 ------------------------------------------------------------
 local function cleanupSpeed()
-	if speedState.loop then speedState.loop:Disconnect() speedState.loop = nil end
-	if speedState.bv and speedState.bv.Parent then speedState.bv:Destroy() end
+	if speedState.loop then
+		speedState.loop:Disconnect()
+		speedState.loop = nil
+	end
+	if speedState.bv and speedState.bv.Parent then
+		speedState.bv:Destroy()
+	end
 	speedState.bv = nil
 
 	local char = player.Character
@@ -65,7 +88,11 @@ local function applySpeed()
 			local h = c:FindFirstChildOfClass("Humanoid")
 			if not h or not speedState.bv or not speedState.bv.Parent then return end
 			local md = h.MoveDirection
-			speedState.bv.Velocity = md.Magnitude > 0 and md * speedState.value or Vector3.zero
+			if md.Magnitude > 0 then
+				speedState.bv.Velocity = md * speedState.value
+			else
+				speedState.bv.Velocity = Vector3.zero
+			end
 		end)
 		track(speedState.loop)
 	end
@@ -75,7 +102,10 @@ end
 -- FOV
 ------------------------------------------------------------
 local function cleanupFOV()
-	if fovState.loop then fovState.loop:Disconnect() fovState.loop = nil end
+	if fovState.loop then
+		fovState.loop:Disconnect()
+		fovState.loop = nil
+	end
 	local cam = workspace.CurrentCamera
 	if cam then cam.FieldOfView = Config.FOV_DEFAULT end
 end
@@ -140,8 +170,9 @@ local function buildUI()
 		return
 	end
 
-	-- WALKSPEED
+	-- ============ WALKSPEED ============
 	Elements.label(page, "WALKSPEED (16-150)", 2)
+
 	local wsVal = Elements.label(page, "REAL 16 / FAKE 15", 18,
 		{ color = Color3.fromRGB(255, 255, 255), size = 10 })
 
@@ -158,8 +189,9 @@ local function buildUI()
 		if on then applySpeed() else cleanupSpeed() end
 	end)
 
-	-- FOV
+	-- ============ FOV ============
 	Elements.label(page, "FOV ENABLE", 86)
+
 	local fovVal = Elements.label(page, "FOV: " .. Config.FOV_DEFAULT, 104,
 		{ color = Color3.fromRGB(255, 255, 255), size = 10 })
 
@@ -174,7 +206,7 @@ local function buildUI()
 		if on then applyFOV() else cleanupFOV() end
 	end)
 
-	-- FULLBRIGHT
+	-- ============ FULLBRIGHT ============
 	Elements.label(page, "FULLBRIGHT", 138)
 	Hub.Toggles.fullbright = Elements.switch(page, 136, function(on)
 		fbState.enabled = on
@@ -196,8 +228,10 @@ function Movement.init(hub)
 		return
 	end
 
+	-- UI
 	buildUI()
 
+	-- ============ RESPAWN ============
 	track(player.CharacterAdded:Connect(function()
 		task.wait(1)
 		if speedState.enabled then
@@ -206,6 +240,7 @@ function Movement.init(hub)
 		end
 	end))
 
+	-- ============ CLEANUP ============
 	function Movement.cleanup()
 		speedState.enabled = false
 		fovState.enabled = false
