@@ -22,8 +22,6 @@ function UI.init(Hub)
 		Text        = Color3.fromRGB(220, 200, 255),
 		TextBright  = Color3.fromRGB(255, 255, 255),
 		Danger      = Color3.fromRGB(150, 0, 0),
-		Success     = Color3.fromRGB(0, 130, 0),
-		Info        = Color3.fromRGB(0, 100, 180),
 		SwitchOff   = Color3.fromRGB(60, 60, 60),
 		SwitchOn    = Color3.fromRGB(120, 0, 200),
 	}
@@ -266,10 +264,10 @@ function UI.init(Hub)
 	local unloadBtn = Elements.button(holder, "Выгрузить", 3, COLORS.Danger, 100)
 
 	-- ============================================================
-	-- ============  MENU FRAME  ==================================
+	-- ============  MENU FRAME (КОМПАКТНО)  ======================
 	-- ============================================================
 	local menu = Instance.new("Frame")
-	menu.Size = UDim2.new(0, 280, 0, 380)
+	menu.Size = UDim2.new(0, 280, 0, 300)
 	menu.Position = UDim2.new(0, 20, 0, 80)
 	menu.BackgroundColor3 = COLORS.Background
 	menu.BorderSizePixel = 0
@@ -405,16 +403,12 @@ function UI.init(Hub)
 		"features/bypass.lua",
 		"features/notify.lua",
 		"features/misc.lua",
-		"features/save.lua",       -- ← ПОСЛЕДНИМ (регистрирует тумблеры других модулей)
+		"features/save.lua",
 	}
 
 	print("[UI] ========== ЗАГРУЗКА МОДУЛЕЙ ==========")
 	print("[UI] Hub.Page:", Hub.Page)
 	print("[UI] Hub.Elements:", Hub.Elements)
-	print("[UI] Hub.Objects.Elements:", Hub.Objects.Elements)
-	print("[UI] Page 1:", Hub.Page(1))
-	print("[UI] Page 2:", Hub.Page(2))
-	print("[UI] Page 3:", Hub.Page(3))
 
 	for _, path in ipairs(modules) do
 		print("[UI] Загружаю: " .. path)
@@ -425,7 +419,7 @@ function UI.init(Hub)
 			continue
 		end
 		if type(mod) ~= "table" then
-			warn("[UI] ❌ " .. path .. " → mod не таблица (" .. type(mod) .. ")")
+			warn("[UI] ❌ " .. path .. " → mod не таблица")
 			continue
 		end
 		if not mod.init then
@@ -452,15 +446,10 @@ function UI.init(Hub)
 	unloadBtn.MouseButton1Click:Connect(function()
 		print("[UI] Unloading...")
 
-		-- ⭐ 1. Сначала SAVE — сохраняем настройки ДО выгрузки
 		if Hub.Modules.save and Hub.Modules.save.cleanup then
-			local ok, err = pcall(Hub.Modules.save.cleanup)
-			if not ok then
-				warn("[UI] save.cleanup failed: " .. tostring(err))
-			end
+			pcall(Hub.Modules.save.cleanup)
 		end
 
-		-- 2. Потом все остальные модули
 		for name, mod in pairs(Hub.Modules) do
 			if name ~= "save"
 				and type(mod) == "table"
@@ -470,20 +459,16 @@ function UI.init(Hub)
 			end
 		end
 
-		-- 3. Выключаем все тоглы
 		for _, sw in pairs(Hub.Toggles) do
 			pcall(function() sw.set(false) end)
 		end
 
-		-- 4. Отключаем общие коннекты
 		for _, c in pairs(Hub.Connections) do
 			pcall(function() c:Disconnect() end)
 		end
 		Hub.Connections = {}
 
-		-- 5. Удаляем GUI
 		if gui and gui.Parent then gui:Destroy() end
-
 		print("[HUB] Unloaded")
 	end)
 
