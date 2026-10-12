@@ -22,6 +22,8 @@ function UI.init(Hub)
 		Text        = Color3.fromRGB(220, 200, 255),
 		TextBright  = Color3.fromRGB(255, 255, 255),
 		Danger      = Color3.fromRGB(150, 0, 0),
+		Success     = Color3.fromRGB(0, 130, 0),
+		Info        = Color3.fromRGB(0, 100, 180),
 		SwitchOff   = Color3.fromRGB(60, 60, 60),
 		SwitchOn    = Color3.fromRGB(120, 0, 200),
 	}
@@ -267,7 +269,7 @@ function UI.init(Hub)
 	-- ============  MENU FRAME  ==================================
 	-- ============================================================
 	local menu = Instance.new("Frame")
-	menu.Size = UDim2.new(0, 280, 0, 300)
+	menu.Size = UDim2.new(0, 280, 0, 380)
 	menu.Position = UDim2.new(0, 20, 0, 80)
 	menu.BackgroundColor3 = COLORS.Background
 	menu.BorderSizePixel = 0
@@ -278,7 +280,7 @@ function UI.init(Hub)
 	stroke(menu, COLORS.Accent, 2)
 
 	-- ============================================================
-	-- ============  PAGES (СНАЧАЛА!)  ============================
+	-- ============  PAGES  =======================================
 	-- ============================================================
 	local pages = {}
 	local pagesCount = 3
@@ -346,7 +348,7 @@ function UI.init(Hub)
 	showPage(1)
 
 	-- ============================================================
-	-- ============  ПУБЛИЧНОЕ API (ПОСЛЕ pages и Elements)  ======
+	-- ============  ПУБЛИЧНОЕ API  ===============================
 	-- ============================================================
 	Hub.Page = function(n) return pages[n] end
 	Hub.Elements = Elements
@@ -382,7 +384,7 @@ function UI.init(Hub)
 	end)
 
 	-- ============================================================
-	-- ============  ЗАГРУЗКА МОДУЛЕЙ (В САМОМ КОНЦЕ)  ============
+	-- ============  ЗАГРУЗКА МОДУЛЕЙ  ============================
 	-- ============================================================
 	local function loadModule(path)
 		local url = BASE .. path .. "?t=" .. tostring(os.time())
@@ -403,6 +405,7 @@ function UI.init(Hub)
 		"features/bypass.lua",
 		"features/notify.lua",
 		"features/misc.lua",
+		"features/save.lua",       -- ← ПОСЛЕДНИМ (регистрирует тумблеры других модулей)
 	}
 
 	print("[UI] ========== ЗАГРУЗКА МОДУЛЕЙ ==========")
@@ -441,30 +444,46 @@ function UI.init(Hub)
 		end
 	end
 
-	print("[UI] ========== ПОСЛЕ ЗАГРУЗКИ ==========")
-	print("[UI] Page 2 детей:", #Hub.Page(2):GetChildren())
-	for _, c in ipairs(Hub.Page(2):GetChildren()) do
-		print("[UI]   -", c.ClassName, "|", c.Name, "| Visible:", c.Visible)
-	end
 	print("[UI] =========================================")
 
 	-- ============================================================
 	-- ============  UNLOAD  ======================================
 	-- ============================================================
 	unloadBtn.MouseButton1Click:Connect(function()
+		print("[UI] Unloading...")
+
+		-- ⭐ 1. Сначала SAVE — сохраняем настройки ДО выгрузки
+		if Hub.Modules.save and Hub.Modules.save.cleanup then
+			local ok, err = pcall(Hub.Modules.save.cleanup)
+			if not ok then
+				warn("[UI] save.cleanup failed: " .. tostring(err))
+			end
+		end
+
+		-- 2. Потом все остальные модули
 		for name, mod in pairs(Hub.Modules) do
-			if type(mod) == "table" and mod.cleanup then
+			if name ~= "save"
+				and type(mod) == "table"
+				and mod.cleanup
+			then
 				pcall(mod.cleanup)
 			end
 		end
+
+		-- 3. Выключаем все тоглы
 		for _, sw in pairs(Hub.Toggles) do
 			pcall(function() sw.set(false) end)
 		end
+
+		-- 4. Отключаем общие коннекты
 		for _, c in pairs(Hub.Connections) do
 			pcall(function() c:Disconnect() end)
 		end
 		Hub.Connections = {}
+
+		-- 5. Удаляем GUI
 		if gui and gui.Parent then gui:Destroy() end
+
 		print("[HUB] Unloaded")
 	end)
 
