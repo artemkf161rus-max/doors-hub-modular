@@ -14,7 +14,7 @@ local aiState = {
 	enabled = false,
 	loop = nil,
 	lastFire = 0,
-	whitelistRange = 15,  -- радиус для whitelist
+	whitelistRange = 25,
 }
 
 -- ============================================================
@@ -130,13 +130,11 @@ local function TriggerPrompt(Prompt)
 		return
 	end
 
-	-- прочность
 	local ParentItem = HasItem(Prompt.Parent.Name)
 	if ParentItem and ParentItem:GetAttribute("Durability") and ParentItem:GetAttribute("DurabilityMax")
 		and ParentItem:GetAttribute("Durability") >= ParentItem:GetAttribute("DurabilityMax")
 	then return end
 
-	-- lock prompts
 	local LockPromptNames = {
 		UnlockPrompt = true, SkullPrompt = true, LockPrompt = true,
 		ThingToEnable = true, FusesPrompt = true,
@@ -214,14 +212,13 @@ local function runLoop()
 	local now = tick()
 	if now - aiState.lastFire < 1/60 then return end
 
-	-- ⭐ ШАГ 1: WHITELIST — без проверок Enabled/Distance
+	-- ⭐ ШАГ 1: WHITELIST — активируем ВСЕ подряд
 	for _, prompt in ipairs(workspace:GetDescendants()) do
 		if prompt:IsA("ProximityPrompt") and isWhitelistedPrompt(prompt) then
 			local pos = getPromptPos(prompt)
 			if pos and player:DistanceFromCharacter(pos) < aiState.whitelistRange then
 				FirePrompt(prompt)
-				aiState.lastFire = now
-				return
+				-- НЕ return — продолжаем на следующий
 			end
 		end
 	end
@@ -275,14 +272,20 @@ local function buildUI()
 		end
 	end)
 
-	Elements.label(page, "Whitelist: DrawerContainer*, Drawer*", 154,
+	Elements.label(page, "Whitelist Range (10-50)", 154)
+	local rangeVal = Elements.label(page, "Range: 25", 170,
+		{ color = Color3.fromRGB(255, 255, 255), size = 10 })
+
+	Elements.slider(page, 186, 10, 50, 25, function(v)
+		aiState.whitelistRange = math.floor(v)
+		rangeVal.Text = "Range: " .. aiState.whitelistRange
+	end)
+
+	Elements.label(page, "Whitelist: DrawerContainer*, Drawer*", 206,
 		{ color = Color3.fromRGB(100, 255, 100), size = 9, font = Enum.Font.Gotham })
 
-	Elements.label(page, "Whitelist range: 15 studs", 170,
+	Elements.label(page, "Активирует ВСЕ слоты подряд", 222,
 		{ color = Color3.fromRGB(100, 255, 100), size = 9, font = Enum.Font.Gotham })
-
-	Elements.label(page, "Blacklist: Hide/Climb/Rift/Donate...", 186,
-		{ color = Color3.fromRGB(255, 150, 150), size = 9, font = Enum.Font.Gotham })
 end
 
 -- ============================================================
