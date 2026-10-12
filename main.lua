@@ -39,6 +39,7 @@ local featureList = {
 	"bypass",
 	"notify",
 	"misc",
+	"ui",
 }
 
 for _, name in ipairs(featureList) do
