@@ -12,14 +12,13 @@ local connections = {}
 
 local CONFIG_FILE = "hub_config.json"
 
--- состояние
 local saveState = {
-	enabled = true,          -- автосохранение
-	loaded = false,          -- загружались ли настройки
+	enabled = true,
+	loaded = false,
 	lastSave = 0,
-	saveDelay = 2,           -- секунд между автосохранениями
-	values = {},             -- [key] = value (текущие значения)
-	subscriptions = {},      -- [key] = {get, set} функции для чтения/записи
+	saveDelay = 2,
+	values = {},
+	subscriptions = {},
 }
 
 -- ============================================================
@@ -132,7 +131,6 @@ function Save.load()
 		return false
 	end
 
-	-- применяем значения
 	local applied, skipped = 0, 0
 
 	for key, sub in pairs(saveState.subscriptions) do
@@ -167,7 +165,6 @@ end
 
 function Save.deleteFile()
 	if hasFs() and fileExists(CONFIG_FILE) then
-		-- перезаписываем пустым
 		pcall(function()
 			writefile(CONFIG_FILE, "{}")
 		end)
@@ -181,7 +178,6 @@ end
 local function startAutoSave()
 	if not hasFs() then return end
 
-	-- сохраняем каждые N секунд если что-то изменилось
 	local lastSnapshot = ""
 
 	task.spawn(function()
@@ -189,7 +185,6 @@ local function startAutoSave()
 			task.wait(saveState.saveDelay)
 
 			if saveState.enabled and saveState.loaded then
-				-- собираем значения и сравниваем
 				local data = collectValues()
 				local ok, encoded = pcall(function()
 					return HttpService:JSONEncode(data)
@@ -205,7 +200,7 @@ local function startAutoSave()
 end
 
 -- ============================================================
--- UI (page 3)
+-- UI (page 3) — КОМПАКТНАЯ ВЕРСИЯ
 -- ============================================================
 local function buildUI()
 	page = Hub.Page(3)
@@ -214,83 +209,81 @@ local function buildUI()
 		return
 	end
 
-	-- заголовок
-	Elements.label(page, "═══ SAVE CONFIG ═══", 250,
-		{ color = Color3.fromRGB(255, 200, 0), size = 11, font = Enum.Font.GothamBold })
-
-	-- статус
-	local statusText = hasFs() and "Ready" or "NOT SUPPORTED"
+	local statusText = hasFs() and "Ready" or "NO FS"
 	local statusColor = hasFs() and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
 
+	-- статус-лейбл
 	local statusLabel = Elements.label(page,
-		"Status: " .. statusText, 268,
+		"SAVE CONFIG — " .. statusText, 250,
 		{ color = statusColor, size = 10, font = Enum.Font.GothamBold })
 
-	-- тумблер автосохранения
-	Elements.label(page, "AUTO SAVE", 288)
-	Hub.Toggles.autoSave = Elements.switch(page, 286, function(on)
+	-- auto save (компактно)
+	Elements.label(page, "Auto Save", 268)
+	Hub.Toggles.autoSave = Elements.switch(page, 266, function(on)
 		saveState.enabled = on
 		print("[SAVE] Auto-save " .. (on and "ON" or "OFF"))
 	end)
 
-	-- кнопки
+	-- кнопки в одну строку
 	local btnHolder = Instance.new("Frame")
-	btnHolder.Size = UDim2.new(1, -20, 0, 30)
-	btnHolder.Position = UDim2.new(0, 10, 0, 310)
+	btnHolder.Size = UDim2.new(1, -20, 0, 24)
+	btnHolder.Position = UDim2.new(0, 10, 0, 288)
 	btnHolder.BackgroundTransparency = 1
 	btnHolder.Parent = page
 
 	local btnLayout = Instance.new("UIListLayout")
 	btnLayout.FillDirection = Enum.FillDirection.Horizontal
-	btnLayout.Padding = UDim.new(0, 5)
+	btnLayout.Padding = UDim.new(0, 4)
 	btnLayout.Parent = btnHolder
 
 	-- SAVE
-	local saveBtn = Elements.button(btnHolder, "Сохранить", 1,
-		Color3.fromRGB(0, 130, 0), 85)
+	local saveBtn = Elements.button(btnHolder, "Save", 1,
+		Color3.fromRGB(0, 130, 0), 80)
+	saveBtn.Size = UDim2.new(0, 80, 0, 22)
+	saveBtn.TextSize = 11
 	saveBtn.MouseButton1Click:Connect(function()
 		if Save.save() then
-			statusLabel.Text = "Status: Saved ✓"
+			statusLabel.Text = "SAVE CONFIG — Saved ✓"
 			statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
 			task.delay(2, function()
-				statusLabel.Text = "Status: " .. statusText
+				statusLabel.Text = "SAVE CONFIG — " .. statusText
 				statusLabel.TextColor3 = statusColor
 			end)
 		else
-			statusLabel.Text = "Status: Save FAILED"
+			statusLabel.Text = "SAVE CONFIG — FAILED"
 			statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
 		end
 	end)
 
 	-- LOAD
-	local loadBtn = Elements.button(btnHolder, "Загрузить", 2,
-		Color3.fromRGB(0, 100, 180), 85)
+	local loadBtn = Elements.button(btnHolder, "Load", 2,
+		Color3.fromRGB(0, 100, 180), 80)
+	loadBtn.Size = UDim2.new(0, 80, 0, 22)
+	loadBtn.TextSize = 11
 	loadBtn.MouseButton1Click:Connect(function()
 		if Save.load() then
-			statusLabel.Text = "Status: Loaded ✓"
+			statusLabel.Text = "SAVE CONFIG — Loaded ✓"
 			statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
 			task.delay(2, function()
-				statusLabel.Text = "Status: " .. statusText
+				statusLabel.Text = "SAVE CONFIG — " .. statusText
 				statusLabel.TextColor3 = statusColor
 			end)
 		else
-			statusLabel.Text = "Status: Load FAILED"
-			statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+			statusLabel.Text = "SAVE CONFIG — No file"
+			statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
 		end
 	end)
 
 	-- RESET
-	local resetBtn = Elements.button(btnHolder, "Сброс", 3,
-		Color3.fromRGB(150, 0, 0), 75)
+	local resetBtn = Elements.button(btnHolder, "Reset", 3,
+		Color3.fromRGB(150, 0, 0), 70)
+	resetBtn.Size = UDim2.new(0, 70, 0, 22)
+	resetBtn.TextSize = 11
 	resetBtn.MouseButton1Click:Connect(function()
 		Save.reset()
-		statusLabel.Text = "Status: Reset — перезапусти"
+		statusLabel.Text = "SAVE CONFIG — Reset (restart)"
 		statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
 	end)
-
-	-- подпись внизу
-	Elements.label(page, "Файл: " .. CONFIG_FILE, 350,
-		{ color = Color3.fromRGB(120, 120, 120), size = 9, font = Enum.Font.Gotham })
 end
 
 -- ============================================================
@@ -307,21 +300,10 @@ function Save.init(hub)
 		return
 	end
 
-	-- UI
 	buildUI()
-
-	-- сохраняем модуль в Hub
 	Hub.Modules.save = Save
 
-	-- ============ РЕГИСТРАЦИЯ НАСТРОЕК ============
-	-- здесь мы регистрируем все тумблеры и слайдеры, которые надо сохранять
-	-- формат: Save.register(key, getter, setter)
-
-	-- ⚠️ ВАЖНО: registration должен происходить ПОСЛЕ загрузки всех модулей
-	-- (т.к. мы должны знать все тумблеры). Поэтому регистрация ниже через task.defer
-
 	task.defer(function()
-		-- ждём 3 секунды чтобы все модули загрузили свои тумблеры
 		task.wait(3)
 
 		local function reg(key, toggleObj)
@@ -343,8 +325,8 @@ function Save.init(hub)
 		reg("movement.fullbright", Hub.Toggles.fullbright)
 
 		-- Bypass
-		reg("bypass.anticheat",  Hub.Toggles.bypass)
-		reg("bypass.doorReach",  Hub.Toggles.doorReach)
+		reg("bypass.anticheat", Hub.Toggles.bypass)
+		reg("bypass.doorReach", Hub.Toggles.doorReach)
 
 		-- Notify
 		reg("notify.entity", Hub.Toggles.entityNotify)
@@ -353,30 +335,21 @@ function Save.init(hub)
 		reg("misc.antiLag",       Hub.Toggles.antiLag)
 		reg("misc.infiniteItems", Hub.Toggles.infiniteItems)
 
-		print("[SAVE] Зарегистрировано: " .. tostring(#(function()
-			local c = 0
-			for _ in pairs(saveState.subscriptions) do c = c + 1 end
-			return c
-		end)()) .. " настроек")
+		local count = 0
+		for _ in pairs(saveState.subscriptions) do count = count + 1 end
+		print("[SAVE] Зарегистрировано: " .. tostring(count) .. " настроек")
 
-		-- ============ ЗАГРУЗКА ============
 		task.wait(0.5)
 		Save.load()
-
-		-- ============ АВТОСЕЙВ ============
 		startAutoSave()
 	end)
 
-	-- ============ CLEANUP ============
 	function Save.cleanup()
-		-- сохраняем перед выгрузкой
 		if saveState.enabled then
 			pcall(Save.save)
 		end
-
 		saveState.enabled = false
 		saveState.subscriptions = {}
-
 		for _, conn in ipairs(connections) do
 			pcall(function() conn:Disconnect() end)
 		end
