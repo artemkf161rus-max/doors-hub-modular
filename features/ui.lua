@@ -7,6 +7,8 @@ function UI.init(Hub)
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui")
 
+	local BASE = "https://raw.githubusercontent.com/artemkf161rus-max/doors-hub-modular/refs/heads/main/"
+
 	-- ==================== ЦВЕТА ====================
 	local COLORS = {
 		Background  = Color3.fromRGB(45, 0, 80),
@@ -86,7 +88,9 @@ function UI.init(Hub)
 		end)
 	end
 
-	-- ==================== ЭЛЕМЕНТЫ ====================
+	-- ============================================================
+	-- ============  ELEMENTS (до создания меню)  =================
+	-- ============================================================
 	local Elements = {}
 
 	function Elements.label(parent, text, y, cfg)
@@ -213,6 +217,14 @@ function UI.init(Hub)
 	end
 
 	function Elements.button(parent, text, order, color, width, callback)
+		-- защита от дублей
+		for _, child in ipairs(parent:GetChildren()) do
+			if child:IsA("TextButton") and child.Text == text then
+				warn("[Elements] Кнопка '" .. text .. "' уже есть на этой странице — возвращаю существующую")
+				return child
+			end
+		end
+
 		local b = Instance.new("TextButton")
 		b.Size = UDim2.new(0, width or 80, 0, 40)
 		b.BackgroundColor3 = color or COLORS.AccentDark
@@ -231,9 +243,9 @@ function UI.init(Hub)
 		return b
 	end
 
-	Hub.Objects.Elements = Elements
-
-	-- ==================== HOLDER ====================
+	-- ============================================================
+	-- ============  BUTTON HOLDER  ===============================
+	-- ============================================================
 	local holder = Instance.new("Frame")
 	holder.Size = UDim2.new(0, 320, 0, 40)
 	holder.Position = UDim2.new(0, 20, 0, 20)
@@ -249,7 +261,9 @@ function UI.init(Hub)
 	local lockBtn   = Elements.button(holder, "Locked", 2, Color3.fromRGB(75, 0, 130), 90)
 	local unloadBtn = Elements.button(holder, "Выгрузить", 3, COLORS.Danger, 100)
 
-	-- ==================== MENU ====================
+	-- ============================================================
+	-- ============  MENU  ========================================
+	-- ============================================================
 	local menu = Instance.new("Frame")
 	menu.Size = UDim2.new(0, 280, 0, 300)
 	menu.Position = UDim2.new(0, 20, 0, 80)
@@ -261,7 +275,9 @@ function UI.init(Hub)
 	corner(menu, 10)
 	stroke(menu, COLORS.Accent, 2)
 
-	-- ==================== PAGES ====================
+	-- ============================================================
+	-- ============  PAGES (СНАЧАЛА СОЗДАЁМ, ПОТОМ Hub.Page)  =====
+	-- ============================================================
 	local pages = {}
 	local pagesCount = 3
 	for i = 1, pagesCount do
@@ -273,6 +289,7 @@ function UI.init(Hub)
 		pages[i] = p
 	end
 
+	-- НАВИГАЦИЯ
 	local nav = Instance.new("Frame")
 	nav.Size = UDim2.new(1, -20, 0, 30)
 	nav.Position = UDim2.new(0, 10, 1, -35)
@@ -325,7 +342,19 @@ function UI.init(Hub)
 	next_.MouseButton1Click:Connect(function() showPage(currentPage + 1) end)
 	showPage(1)
 
-	-- ==================== DRAG & BUTTONS ====================
+	-- ============================================================
+	-- ============  ПУБЛИЧНОЕ API (ПОСЛЕ pages и Elements)  ======
+	-- ============================================================
+	Hub.Page = function(n) return pages[n] end
+	Hub.Elements = Elements
+	Hub.Objects.Elements = Elements  -- ДУБЛИРУЕМ для модулей
+	Hub.MenuGui = gui
+	Hub.MenuFrame = menu
+	Hub.Pages = pages
+
+	-- ============================================================
+	-- ============  DRAG & BUTTONS  ==============================
+	-- ============================================================
 	makeDraggable(holder, toggleBtn)
 	makeDraggable(holder, lockBtn)
 	makeDraggable(holder, unloadBtn)
@@ -349,19 +378,13 @@ function UI.init(Hub)
 		lockBtn.BackgroundColor3 = isLocked and Color3.fromRGB(75, 0, 130) or Color3.fromRGB(120, 0, 200)
 	end)
 
-	-- ==================== PUBLIC API ====================
-	Hub.Page = function(n) return pages[n] end
-	Hub.Elements = Elements
-	Hub.MenuGui = gui
-
 	-- ============================================================
-	-- ================  ЗАГРУЗКА МОДУЛЕЙ  ========================
+	-- ============  ЗАГРУЗКА МОДУЛЕЙ  ============================
 	-- ============================================================
-	local BASE = "https://raw.githubusercontent.com/artemkf161rus-max/doors-hub-modular/refs/heads/main/"
-
 	local function loadModule(path)
+		local url = BASE .. path .. "?t=" .. tostring(os.time())
 		local ok, result = pcall(function()
-			return loadstring(game:HttpGet(BASE .. path))()
+			return loadstring(game:HttpGet(url))()
 		end)
 		if not ok then
 			warn("[UI] Ошибка загрузки " .. path .. ": " .. tostring(result))
@@ -370,7 +393,6 @@ function UI.init(Hub)
 		return result
 	end
 
-	-- порядок важен: сначала ui уже создан, потом фичи
 	local modules = {
 		"features/esp.lua",
 		"features/movement.lua",
@@ -380,25 +402,52 @@ function UI.init(Hub)
 		"features/misc.lua",
 	}
 
+	print("[UI] ========== ЗАГРУЗКА МОДУЛЕЙ ==========")
+	print("[UI] Hub.Page:", Hub.Page)
+	print("[UI] Hub.Elements:", Hub.Elements)
+	print("[UI] Hub.Objects.Elements:", Hub.Objects.Elements)
+
 	for _, path in ipairs(modules) do
+		print("[UI] Загружаю: " .. path)
+
 		local mod = loadModule(path)
-		if mod and type(mod) == "table" and mod.init then
-			local ok, err = pcall(mod.init, Hub)
-			if ok then
-				print("[UI] Модуль загружен: " .. path)
-			else
-				warn("[UI] Модуль " .. path .. " упал: " .. tostring(err))
-			end
+		if not mod then
+			warn("[UI] ❌ " .. path .. " → mod = nil")
+			continue
+		end
+
+		if type(mod) ~= "table" then
+			warn("[UI] ❌ " .. path .. " → mod не таблица (" .. type(mod) .. ")")
+			continue
+		end
+
+		if not mod.init then
+			warn("[UI] ❌ " .. path .. " → нет .init")
+			continue
+		end
+
+		local name = path:match("features/(%w+)%.lua")
+		Hub.Modules[name] = mod
+
+		local ok, err = pcall(mod.init, Hub)
+		if ok then
+			print("[UI] ✅ " .. name .. " загружен")
 		else
-			warn("[UI] Модуль " .. path .. " не вернул init()")
+			warn("[UI] ❌ " .. name .. " упал:")
+			warn("[UI]   " .. tostring(err))
 		end
 	end
+	print("[UI] =========================================")
 
-	-- ==================== UNLOAD ====================
+	-- ============================================================
+	-- ============  UNLOAD  ======================================
+	-- ============================================================
 	unloadBtn.MouseButton1Click:Connect(function()
-		-- вызываем cleanup у ESP-модуля
-		if Hub.Modules and Hub.Modules.esp and Hub.Modules.esp.cleanup then
-			pcall(Hub.Modules.esp.cleanup)
+		-- cleanup у всех модулей
+		for name, mod in pairs(Hub.Modules) do
+			if type(mod) == "table" and mod.cleanup then
+				pcall(mod.cleanup)
+			end
 		end
 
 		-- выключаем все тоглы
@@ -417,6 +466,7 @@ function UI.init(Hub)
 		print("[HUB] Unloaded")
 	end)
 
+	print("[UI] Готово")
 	return Hub
 end
 
