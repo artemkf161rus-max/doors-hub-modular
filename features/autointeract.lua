@@ -3,52 +3,72 @@
 -- ============================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local ProximityPromptService = game:GetService("ProximityPromptService")
 local player = Players.LocalPlayer
 
 local AutoInteract = {}
 
--- ==================== STATE ====================
-local Config
-local Toggles
-local Hub
-local Elements
-local page
-
+local Config, Toggles, Hub, Elements, page
 local connections = {}
 
--- состояние
 local aiState = {
 	enabled = false,
 	loop = nil,
-	distance = 12,           -- радиус активации
-	cooldown = {},           -- [prompt] = tick() — анти-спам
+	distance = 12,
+	cooldown = {},
 	lastFire = 0,
-	ignoreBack = false,      -- если true — только prompts в поле зрения
 }
 
 -- ============================================================
 -- НАСТРОЙКИ ИГНОРА
 -- ============================================================
 
--- Игнор по имени родителя (начало имени)
+-- Префиксы имён (проверяем начало имени, регистронезависимо)
 local IGNORE_PREFIXES = {
-	"Regal",      -- Regal / RegalDoor / Regal*
-	"Wardrobe",   -- Wardrobe / Wardrobe-FOOLS26
+	"Regal",
+	"Wardrobe",
 	"Backdoor_Wardrobe",
 	"RetroWardrobe",
-	"Rooms_Locker",       -- на всякий
+	"Rooms_Locker",
 	"Locker_Large",
 	"CircularVent",
 	"Dumpster",
-	"Bed",                -- кровати тоже не трогаем
+	"Bed",
 	"Double_Bed",
-	"HidePrompt",         -- само hiding
-	"Hide",
 	"Painting",
+	"Paintings",
+	"PaintingsContainer",
+	"PaintingFrame",
+	"FakeDoor",
+	"DoorFake",
+	"SideroomSpace",
+	"Hide",
+	"Climb",
+	"Rift",
+	"Star",
+	"Donate",
+	"Dialogue",
+	"Animate",
+	"ToolEvent",
+	"PropPrompt",
 }
 
--- Игнор по имени самого prompt'а (точное совпадение)
+-- Жёсткие подстроки (проверяем в любом месте имени, регистронезависимо)
+local IGNORE_SUBSTRINGS = {
+	"painting",
+	"paintings",
+	"paint",
+	"regal",
+	"wardrobe",
+	"hideprompt",
+	"climbprompt",
+	"fakedoor",
+	"doorfake",
+	"fireplace",
+	"movingdoor",
+	"wax_door",
+}
+
+-- Точные имена prompt'ов (полное совпадение)
 local IGNORE_PROMPT_NAMES = {
 	HidePrompt = true,
 	ClimbPrompt = true,
@@ -60,64 +80,69 @@ local IGNORE_PROMPT_NAMES = {
 	EnterPrompt = true,
 	AnimatePrompt = true,
 	ToolEventPrompt = true,
+	PropPrompt = true,
 }
 
 -- ============================================================
 -- ХЕЛПЕРЫ
 -- ============================================================
-local function getPlayerPos()
-	local char = player.Character
-	if not char then return nil end
-	local root = char:FindFirstChild("HumanoidRootPart")
-	return root and root.Position
-end
-
-local function startsWith(str, prefix)
-	return string.sub(str, 1, #prefix) == prefix
-end
-
-local function isIgnoredByPrefix(name)
-	for _, prefix in ipairs(IGNORE_PREFIXES) do
-		if startsWith(name, prefix) then
+local function containsSubstring(name, substrings)
+	if not name then return false end
+	local lowerName = string.lower(name)
+	for _, s in ipairs(substrings) do
+		if string.find(lowerName, s, 1, true) then
 			return true
 		end
 	end
 	return false
 end
 
-local function getPromptParent(prompt)
-	local parent = prompt.Parent
-	if not parent then return nil end
-	return parent
+local function startsWithPrefix(name, prefixes)
+	if not name then return false end
+	local lowerName = string.lower(name)
+	for _, prefix in ipairs(prefixes) do
+		if string.sub(lowerName, 1, #prefix) == string.lower(prefix) then
+			return true
+		end
+	end
+	return false
 end
 
 local function isIgnored(prompt)
-	-- 1. по имени prompt'а
+	-- 1. по имени prompt'а (точное)
 	if IGNORE_PROMPT_NAMES[prompt.Name] then return true end
 
-	-- 2. по имени родителя (точное или префикс)
-	local parent = getPromptParent(prompt)
-	if not parent then return true end
-
-	local parentName = parent.Name
-
-	-- 2a. точное совпадение по имени родителя
-	if IGNORE_PROMPT_NAMES[parentName] then return true end
-
-	-- 2b. префикс (Regal, Wardrobe, ...)
-	if isIgnoredByPrefix(parentName) then return true end
-
-	-- 2c. если родитель — Model, проверяем ещё и родителей выше
-	if parent:IsA("Model") then
-		local grand = parent.Parent
-		if grand and grand.Name then
-			if IGNORE_PROMPT_NAMES[grand.Name] then return true end
-			if isIgnoredByPrefix(grand.Name) then return true end
-		end
-	end
-
-	-- 3. если fake prompt — тоже пропускаем (это для Infinite Items)
+	-- 2. fake prompt (для Infinite Items)
 	if prompt:GetAttribute("FakePrompt") then return true end
+
+	-- 3. имя самого prompt'а содержит запретную подстроку
+	if containsSubstring(prompt.Name, IGNORE_SUBSTRINGS) then return true end
+
+	-- 4. по всей цепочке родителей вверх (до 15 уровней)
+	local current = prompt.Parent
+	local depth = 0
+	while current and depth < 15 do
+		local name = current.Name
+
+		-- точное совпадение по имени
+		if IGNORE_PROMPT_NAMES[name] then return true end
+
+		-- префикс
+		if startsWithPrefix(name, IGNORE_PREFIXES) then return true end
+
+		-- подстрока (жёстко)
+		if containsSubstring(name, IGNORE_SUBSTRINGS) then return true end
+
+		-- проверяем атрибуты (некоторые модели имеют атрибут с "paint")
+		for attrName in pairs(current:GetAttributes()) do
+			if string.find(string.lower(attrName), "paint", 1, true) then
+				return true
+			end
+		end
+
+		current = current.Parent
+		depth = depth + 1
+	end
 
 	return false
 end
@@ -149,16 +174,14 @@ local function runLoop()
 	local myPos = root.Position
 	local now = tick()
 
-	-- не чаще 20 раз в секунду
+	-- throttle: не чаще 20 раз в секунду
 	if now - aiState.lastFire < 0.05 then return end
 
-	-- перебираем все prompts
 	for _, prompt in ipairs(workspace:GetDescendants()) do
 		if prompt:IsA("ProximityPrompt")
 			and prompt.Enabled
 			and not isIgnored(prompt)
 		then
-			-- позиция prompt'а
 			local parent = prompt.Parent
 			if parent then
 				local pos
@@ -172,15 +195,13 @@ local function runLoop()
 				if pos then
 					local dist = (pos - myPos).Magnitude
 					if dist <= aiState.distance then
-						-- проверка на cooldown (не спамим один и тот же prompt)
+						-- анти-спам: не чаще 0.5 сек на один prompt
 						local lastUse = aiState.cooldown[prompt] or 0
 						if now - lastUse > 0.5 then
 							aiState.cooldown[prompt] = now
 							firePrompt(prompt)
 							aiState.lastFire = now
-							-- после активации одного prompt выходим из цикла
-							-- чтобы не активировать всё сразу
-							break
+							break  -- один prompt за тик
 						end
 					end
 				end
@@ -227,9 +248,9 @@ local function buildUI()
 		distVal.Text = "Distance: " .. aiState.distance
 	end)
 
-	-- ============ IGNORE INFO ============
+	-- ============ ИНФО ============
 	Elements.label(page,
-		"Ignores: Regal*, Wardrobe*, Hide, Climb",
+		"Ignores: Regal*, Wardrobe*, Painting*, Hide...",
 		206,
 		{ color = Color3.fromRGB(150, 150, 150), size = 9,
 		  font = Enum.Font.Gotham })
