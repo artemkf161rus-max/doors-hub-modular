@@ -22,22 +22,22 @@ local aiState = {
 -- ЖЁСТКИЙ ИГНОР ПО НАЧАЛУ ИМЕНИ (case-insensitive)
 -- ============================================================
 local IGNORE_STARTS_WITH = {
-	"painting",       -- Painting_1, Painting_2, PaintingABC, PaintingWhatever
-	"paintings",      -- PaintingsContainer, PaintingsFolder
-	"regal",          -- Regal, RegalDoor
-	"wardrobe",       -- Wardrobe, Wardrobe-FOOLS26
+	"painting",       -- Painting_1, Painting_2, PaintingABC
+	"paintings",      -- PaintingsContainer
+	"regal",
+	"wardrobe",
 	"backdoor_wardrobe",
 	"retro_wardrobe",
 	"rooms_locker",
 	"locker_large",
 	"circularvent",
 	"dumpster",
-	"bed",            -- Bed, Beds
+	"bed",
 	"double_bed",
 	"fakedoor",
 	"doorfake",
 	"sideroomspace",
-	"hide",           -- HidePrompt, HidingSpot
+	"hide",
 	"climb",
 	"rift",
 	"star",
@@ -51,7 +51,15 @@ local IGNORE_STARTS_WITH = {
 	"wax_door",
 }
 
--- Точные имена prompt'ов
+-- ============================================================
+-- WHITELIST — ВСЕГДА кликать, даже если в игноре
+-- ============================================================
+local ALWAYS_CLICK_STARTS_WITH = {
+	"drawercontainer",     -- ← ГЛАВНОЕ: всегда кликаем
+	"drawer",
+}
+
+-- Точные имена prompt'ов (игнор)
 local IGNORE_PROMPT_NAMES = {
 	HidePrompt = true,
 	ClimbPrompt = true,
@@ -69,14 +77,35 @@ local IGNORE_PROMPT_NAMES = {
 -- ============================================================
 -- ХЕЛПЕРЫ
 -- ============================================================
-local function startsWithIgnore(name)
+local function startsWithAny(name, list)
 	if not name then return false end
 	local lower = string.lower(name)
-	for _, prefix in ipairs(IGNORE_STARTS_WITH) do
+	for _, prefix in ipairs(list) do
 		if string.sub(lower, 1, #prefix) == prefix then
 			return true
 		end
 	end
+	return false
+end
+
+-- Проверка: есть ли в цепочке родителей whitelist-имя
+local function isWhitelisted(prompt)
+	-- сам prompt
+	if startsWithAny(prompt.Name, ALWAYS_CLICK_STARTS_WITH) then
+		return true
+	end
+
+	-- цепочка родителей
+	local current = prompt.Parent
+	local depth = 0
+	while current and depth < 20 do
+		if startsWithAny(current.Name, ALWAYS_CLICK_STARTS_WITH) then
+			return true
+		end
+		current = current.Parent
+		depth = depth + 1
+	end
+
 	return false
 end
 
@@ -88,13 +117,13 @@ local function isIgnored(prompt)
 	if prompt:GetAttribute("FakePrompt") then return true end
 
 	-- 3. имя самого prompt'а начинается с игнора
-	if startsWithIgnore(prompt.Name) then return true end
+	if startsWithAny(prompt.Name, IGNORE_STARTS_WITH) then return true end
 
-	-- 4. вся цепочка родителей вверх — если ЛЮБОЙ начинается на игнор
+	-- 4. вся цепочка родителей вверх
 	local current = prompt.Parent
 	local depth = 0
 	while current and depth < 20 do
-		if startsWithIgnore(current.Name) then return true end
+		if startsWithAny(current.Name, IGNORE_STARTS_WITH) then return true end
 		if IGNORE_PROMPT_NAMES[current.Name] then return true end
 
 		current = current.Parent
@@ -102,6 +131,21 @@ local function isIgnored(prompt)
 	end
 
 	return false
+end
+
+-- ГЛАВНАЯ проверка: должен ли активироваться этот prompt
+local function shouldClick(prompt)
+	-- Whitelist имеет высший приоритет
+	if isWhitelisted(prompt) then
+		return true
+	end
+
+	-- Иначе проверяем игнор
+	if isIgnored(prompt) then
+		return false
+	end
+
+	return true
 end
 
 local function firePrompt(prompt)
@@ -132,33 +176,60 @@ local function runLoop()
 
 	if now - aiState.lastFire < 0.05 then return end
 
+	-- собираем кандидатов
+	local whitelisted = {}
+	local normal = {}
+
 	for _, prompt in ipairs(workspace:GetDescendants()) do
 		if prompt:IsA("ProximityPrompt") and prompt.Enabled then
-			if not isIgnored(prompt) then
-				local parent = prompt.Parent
-				if parent then
-					local pos
-					if parent:IsA("BasePart") then
-						pos = parent.Position
-					elseif parent:IsA("Model") then
-						local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
-						pos = pp and pp.Position
-					end
+			local parent = prompt.Parent
+			if parent then
+				local pos
+				if parent:IsA("BasePart") then
+					pos = parent.Position
+				elseif parent:IsA("Model") then
+					local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
+					pos = pp and pp.Position
+				end
 
-					if pos then
-						local dist = (pos - myPos).Magnitude
-						if dist <= aiState.distance then
-							local lastUse = aiState.cooldown[prompt] or 0
-							if now - lastUse > 0.5 then
-								aiState.cooldown[prompt] = now
-								firePrompt(prompt)
-								aiState.lastFire = now
-								break  -- один prompt за тик
-							end
+				if pos then
+					local dist = (pos - myPos).Magnitude
+					if dist <= aiState.distance then
+						-- whitelist — отдельная очередь (высший приоритет)
+						if isWhitelisted(prompt) then
+							table.insert(whitelisted, { prompt = prompt, dist = dist })
+						elseif not isIgnored(prompt) then
+							table.insert(normal, { prompt = prompt, dist = dist })
 						end
 					end
 				end
 			end
+		end
+	end
+
+	-- сортируем по дистанции (ближайшие первыми)
+	table.sort(whitelisted, function(a, b) return a.dist < b.dist end)
+	table.sort(normal, function(a, b) return a.dist < b.dist end)
+
+	-- 1. сначала пробуем whitelist
+	for _, c in ipairs(whitelisted) do
+		local lastUse = aiState.cooldown[c.prompt] or 0
+		if now - lastUse > 0.5 then
+			aiState.cooldown[c.prompt] = now
+			firePrompt(c.prompt)
+			aiState.lastFire = now
+			return
+		end
+	end
+
+	-- 2. потом обычные
+	for _, c in ipairs(normal) do
+		local lastUse = aiState.cooldown[c.prompt] or 0
+		if now - lastUse > 0.5 then
+			aiState.cooldown[c.prompt] = now
+			firePrompt(c.prompt)
+			aiState.lastFire = now
+			return
 		end
 	end
 end
@@ -200,9 +271,15 @@ local function buildUI()
 	end)
 
 	Elements.label(page,
-		"Ignores: Painting*, Regal*, Wardrobe*, Hide...",
+		"Ignores: Painting*, Regal*, Wardrobe*...",
 		206,
 		{ color = Color3.fromRGB(150, 150, 150), size = 9,
+		  font = Enum.Font.Gotham })
+
+	Elements.label(page,
+		"Always clicks: DrawerContainer*",
+		222,
+		{ color = Color3.fromRGB(100, 255, 100), size = 9,
 		  font = Enum.Font.Gotham })
 end
 
