@@ -1,5 +1,5 @@
 -- ============================================================
--- ============  MODULE: AUTO INTERACT (DEBUG)  ===============
+-- ============  MODULE: AUTO INTERACT  =======================
 -- ============================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -18,56 +18,40 @@ local aiState = {
 	lastFire = 0,
 }
 
-local DEBUG = true  -- ← выключи когда всё заработает
-
 -- ============================================================
--- НАСТРОЙКИ ИГНОРА
+-- ЖЁСТКИЙ ИГНОР ПО НАЧАЛУ ИМЕНИ (case-insensitive)
 -- ============================================================
-
-local IGNORE_PREFIXES = {
-	"Regal",
-	"Wardrobe",
-	"Backdoor_Wardrobe",
-	"RetroWardrobe",
-	"Rooms_Locker",
-	"Locker_Large",
-	"CircularVent",
-	"Dumpster",
-	"Bed",
-	"Double_Bed",
-	"Painting",
-	"Paintings",
-	"PaintingsContainer",
-	"PaintingFrame",
-	"FakeDoor",
-	"DoorFake",
-	"SideroomSpace",
-	"Hide",
-	"Climb",
-	"Rift",
-	"Star",
-	"Donate",
-	"Dialogue",
-	"Animate",
-	"ToolEvent",
-	"PropPrompt",
-}
-
-local IGNORE_SUBSTRINGS = {
-	"painting",
-	"paintings",
-	"paint",
-	"regal",
-	"wardrobe",
-	"hideprompt",
-	"climbprompt",
+local IGNORE_STARTS_WITH = {
+	"painting",       -- Painting_1, Painting_2, PaintingABC, PaintingWhatever
+	"paintings",      -- PaintingsContainer, PaintingsFolder
+	"regal",          -- Regal, RegalDoor
+	"wardrobe",       -- Wardrobe, Wardrobe-FOOLS26
+	"backdoor_wardrobe",
+	"retro_wardrobe",
+	"rooms_locker",
+	"locker_large",
+	"circularvent",
+	"dumpster",
+	"bed",            -- Bed, Beds
+	"double_bed",
 	"fakedoor",
 	"doorfake",
+	"sideroomspace",
+	"hide",           -- HidePrompt, HidingSpot
+	"climb",
+	"rift",
+	"star",
+	"donate",
+	"dialogue",
+	"animate",
+	"toolevent",
+	"propprompt",
 	"fireplace",
 	"movingdoor",
 	"wax_door",
 }
 
+-- Точные имена prompt'ов
 local IGNORE_PROMPT_NAMES = {
 	HidePrompt = true,
 	ClimbPrompt = true,
@@ -83,46 +67,13 @@ local IGNORE_PROMPT_NAMES = {
 }
 
 -- ============================================================
--- DEBUG LOGGER
--- ============================================================
-local function dbg(msg)
-	if DEBUG then
-		print("[AI] " .. msg)
-	end
-end
-
--- ============================================================
 -- ХЕЛПЕРЫ
 -- ============================================================
-local function getChain(obj, depth)
-	depth = depth or 5
-	local chain = {}
-	local c = obj
-	local d = 0
-	while c and d < depth do
-		table.insert(chain, c.Name)
-		c = c.Parent
-		d = d + 1
-	end
-	return table.concat(chain, " > ")
-end
-
-local function containsSubstring(name, substrings)
+local function startsWithIgnore(name)
 	if not name then return false end
-	local lowerName = string.lower(name)
-	for _, s in ipairs(substrings) do
-		if string.find(lowerName, s, 1, true) then
-			return true
-		end
-	end
-	return false
-end
-
-local function startsWithPrefix(name, prefixes)
-	if not name then return false end
-	local lowerName = string.lower(name)
-	for _, prefix in ipairs(prefixes) do
-		if string.sub(lowerName, 1, #prefix) == string.lower(prefix) then
+	local lower = string.lower(name)
+	for _, prefix in ipairs(IGNORE_STARTS_WITH) do
+		if string.sub(lower, 1, #prefix) == prefix then
 			return true
 		end
 	end
@@ -130,47 +81,27 @@ local function startsWithPrefix(name, prefixes)
 end
 
 local function isIgnored(prompt)
-	-- 1. по имени prompt'а (точное)
-	if IGNORE_PROMPT_NAMES[prompt.Name] then return true, "prompt.Name в списке" end
+	-- 1. точное имя prompt'а
+	if IGNORE_PROMPT_NAMES[prompt.Name] then return true end
 
-	-- 2. fake prompt
-	if prompt:GetAttribute("FakePrompt") then return true, "FakePrompt attribute" end
+	-- 2. fake prompt (для Infinite Items)
+	if prompt:GetAttribute("FakePrompt") then return true end
 
-	-- 3. имя самого prompt'а содержит подстроку
-	if containsSubstring(prompt.Name, IGNORE_SUBSTRINGS) then
-		return true, "prompt.Name содержит подстроку"
-	end
+	-- 3. имя самого prompt'а начинается с игнора
+	if startsWithIgnore(prompt.Name) then return true end
 
-	-- 4. по цепочке родителей
+	-- 4. вся цепочка родителей вверх — если ЛЮБОЙ начинается на игнор
 	local current = prompt.Parent
 	local depth = 0
-	while current and depth < 15 do
-		local name = current.Name
-
-		if IGNORE_PROMPT_NAMES[name] then
-			return true, "родитель '" .. name .. "' в IGNORE_PROMPT_NAMES"
-		end
-
-		if startsWithPrefix(name, IGNORE_PREFIXES) then
-			return true, "родитель '" .. name .. "' начинается с префикса"
-		end
-
-		if containsSubstring(name, IGNORE_SUBSTRINGS) then
-			return true, "родитель '" .. name .. "' содержит подстроку"
-		end
-
-		-- атрибуты
-		for attrName in pairs(current:GetAttributes()) do
-			if string.find(string.lower(attrName), "paint", 1, true) then
-				return true, "родитель '" .. name .. "' имеет атрибут '" .. attrName .. "'"
-			end
-		end
+	while current and depth < 20 do
+		if startsWithIgnore(current.Name) then return true end
+		if IGNORE_PROMPT_NAMES[current.Name] then return true end
 
 		current = current.Parent
 		depth = depth + 1
 	end
 
-	return false, nil
+	return false
 end
 
 local function firePrompt(prompt)
@@ -201,66 +132,32 @@ local function runLoop()
 
 	if now - aiState.lastFire < 0.05 then return end
 
-	-- собираем все prompts в радиусе, с инфо
-	local candidates = {}
-
 	for _, prompt in ipairs(workspace:GetDescendants()) do
 		if prompt:IsA("ProximityPrompt") and prompt.Enabled then
-			local parent = prompt.Parent
-			if parent then
-				local pos
-				if parent:IsA("BasePart") then
-					pos = parent.Position
-				elseif parent:IsA("Model") then
-					local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
-					pos = pp and pp.Position
-				end
+			if not isIgnored(prompt) then
+				local parent = prompt.Parent
+				if parent then
+					local pos
+					if parent:IsA("BasePart") then
+						pos = parent.Position
+					elseif parent:IsA("Model") then
+						local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
+						pos = pp and pp.Position
+					end
 
-				if pos then
-					local dist = (pos - myPos).Magnitude
-					if dist <= aiState.distance then
-						local ignored, reason = isIgnored(prompt)
-						table.insert(candidates, {
-							prompt = prompt,
-							dist = dist,
-							ignored = ignored,
-							reason = reason,
-						})
+					if pos then
+						local dist = (pos - myPos).Magnitude
+						if dist <= aiState.distance then
+							local lastUse = aiState.cooldown[prompt] or 0
+							if now - lastUse > 0.5 then
+								aiState.cooldown[prompt] = now
+								firePrompt(prompt)
+								aiState.lastFire = now
+								break  -- один prompt за тик
+							end
+						end
 					end
 				end
-			end
-		end
-	end
-
-	-- DEBUG: логируем ВСЕ prompts в радиусе
-	if DEBUG and #candidates > 0 then
-		dbg("=== Prompts в радиусе (" .. #candidates .. ") ===")
-		for _, c in ipairs(candidates) do
-			local status
-			if c.ignored then
-				status = "ИГНОР (" .. (c.reason or "?") .. ")"
-			else
-				status = "КАНДИДАТ"
-			end
-			dbg("  " .. status .. " | " .. c.prompt.Name .. 
-				" | dist: " .. math.floor(c.dist) ..
-				" | chain: " .. getChain(c.prompt.Parent, 4))
-		end
-	end
-
-	-- активируем первый не-игнор
-	for _, c in ipairs(candidates) do
-		if not c.ignored then
-			local lastUse = aiState.cooldown[c.prompt] or 0
-			if now - lastUse > 0.5 then
-				dbg(">>> АКТИВИРУЮ: " .. c.prompt.Name ..
-					" | chain: " .. getChain(c.prompt.Parent, 5) ..
-					" | dist: " .. math.floor(c.dist))
-
-				aiState.cooldown[c.prompt] = now
-				firePrompt(c.prompt)
-				aiState.lastFire = now
-				break
 			end
 		end
 	end
@@ -287,7 +184,7 @@ local function buildUI()
 				end)
 				table.insert(connections, aiState.loop)
 			end
-			print("[AUTO INTERACT] ON (dist=" .. aiState.distance .. ", DEBUG=" .. tostring(DEBUG) .. ")")
+			print("[AUTO INTERACT] ON (dist=" .. aiState.distance .. ")")
 		else
 			print("[AUTO INTERACT] OFF")
 		end
@@ -303,9 +200,9 @@ local function buildUI()
 	end)
 
 	Elements.label(page,
-		"DEBUG включён — смотри консоль",
+		"Ignores: Painting*, Regal*, Wardrobe*, Hide...",
 		206,
-		{ color = Color3.fromRGB(255, 200, 0), size = 9,
+		{ color = Color3.fromRGB(150, 150, 150), size = 9,
 		  font = Enum.Font.Gotham })
 end
 
@@ -338,7 +235,7 @@ function AutoInteract.init(hub)
 		connections = {}
 	end
 
-	print("[AUTOINTERACT] Модуль инициализирован (DEBUG=" .. tostring(DEBUG) .. ")")
+	print("[AUTOINTERACT] Модуль инициализирован")
 	return AutoInteract
 end
 
