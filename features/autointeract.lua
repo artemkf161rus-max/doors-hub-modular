@@ -1,8 +1,10 @@
 -- ============================================================
 -- ============  MODULE: AUTO INTERACT  =======================
+-- ============  (Abysall-style, all prompts)  ================
 -- ============================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local player = Players.LocalPlayer
 
 local AutoInteract = {}
@@ -13,99 +15,43 @@ local connections = {}
 local aiState = {
 	enabled = false,
 	loop = nil,
-	distance = 12,
-	cooldown = {},
 	lastFire = 0,
 }
 
 -- ============================================================
--- ЧЁРНЫЙ СПИСОК — если имя НАЧИНАЕТСЯ на одну из строк — НЕ кликаем
--- (case-insensitive)
+-- BLACKLIST (промпты которые НЕ трогаем)
 -- ============================================================
-local BLACKLIST_STARTS_WITH = {
-	"painting",              -- Painting_1, Painting_2, Paintings*
-	"paintings",
-	"regal",                 -- Regal, RegalDoor
-	"wardrobe",              -- Wardrobe, Wardrobe-FOOLS26
-	"backdoor_wardrobe",
-	"retro_wardrobe",
-	"rooms_locker",
-	"locker_large",
-	"circularvent",
-	"dumpster",
-	"bed",
-	"double_bed",
-	"fakedoor",
-	"doorfake",
-	"sideroomspace",
-	"hide",
-	"climb",
-	"rift",
-	"star",
-	"donate",
-	"dialogue",
-	"animate",
-	"toolevent",
-	"propprompt",
-	"fireplace",
-	"movingdoor",
-	"wax_door",
-}
-
--- Точные имена prompt'ов которые игнорим
-local BLACKLIST_PROMPT_NAMES = {
+local AutoInteractBlacklist = {
 	HidePrompt = true,
-	ClimbPrompt = true,
 	RiftPrompt = true,
 	StarRiftPrompt = true,
+	InteractPrompt = true,
+	ClimbPrompt = true,
 	DonatePrompt = true,
 	DialoguePrompt = true,
 	RevivePrompt = true,
 	EnterPrompt = true,
 	AnimatePrompt = true,
 	ToolEventPrompt = true,
+	Prompt = true,
 	PropPrompt = true,
 }
 
 -- ============================================================
--- ХЕЛПЕРЫ
+-- ХЕЛПЕРЫ (как в Abysall)
 -- ============================================================
-local function startsWithAny(name, list)
-	if not name then return false end
-	local lower = string.lower(name)
-	for _, prefix in ipairs(list) do
-		if string.sub(lower, 1, #prefix) == prefix then
-			return true
-		end
+local function HasItem(name, onlyCharacter)
+	local char = player.Character
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not onlyCharacter and backpack and backpack:FindFirstChild(name) then
+		return backpack:FindFirstChild(name)
+	elseif char and char:FindFirstChild(name) then
+		return char:FindFirstChild(name)
 	end
-	return false
+	return nil
 end
 
-local function isBlacklisted(prompt)
-	-- 1. точное имя prompt'а
-	if BLACKLIST_PROMPT_NAMES[prompt.Name] then return true end
-
-	-- 2. fake prompt (для Infinite Items) — не трогаем
-	if prompt:GetAttribute("FakePrompt") then return true end
-
-	-- 3. имя prompt'а начинается с чёрного префикса
-	if startsWithAny(prompt.Name, BLACKLIST_STARTS_WITH) then return true end
-
-	-- 4. вся цепочка родителей вверх (до 20 уровней)
-	local current = prompt.Parent
-	local depth = 0
-	while current and depth < 20 do
-		if startsWithAny(current.Name, BLACKLIST_STARTS_WITH) then return true end
-		if BLACKLIST_PROMPT_NAMES[current.Name] then return true end
-
-		current = current.Parent
-		depth = depth + 1
-	end
-
-	return false
-end
-
-local function firePrompt(prompt)
+local function FirePrompt(prompt)
 	if not prompt or not prompt.Parent then return end
 	if fireproximityprompt then
 		pcall(function() fireproximityprompt(prompt) end)
@@ -119,60 +65,140 @@ local function firePrompt(prompt)
 end
 
 -- ============================================================
--- ОСНОВНОЙ ЦИКЛ
+-- ГЛАВНАЯ ФУНКЦИЯ (порт из Abysall)
+-- ============================================================
+local TriggerDebounce = false
+
+local function TriggerPrompt(Prompt)
+	if not Prompt or not Prompt.Parent then return end
+	if AutoInteractBlacklist[Prompt.Name] then return end
+	if TriggerDebounce then return end
+
+	-- fake prompt — не наш (для Infinite Items)
+	if Prompt:GetAttribute("FakePrompt") then return end
+
+	local char = player.Character
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	-- если у игрока уже есть предмет с полной прочностью — не тратим
+	local ParentItem = HasItem(Prompt.Parent.Name)
+	if ParentItem and ParentItem:GetAttribute("Durability") and ParentItem:GetAttribute("DurabilityMax")
+		and ParentItem:GetAttribute("Durability") >= ParentItem:GetAttribute("DurabilityMax")
+	then return end
+
+	-- ============ LOCK PROMPTS ============
+	local LockPromptNames = {
+		UnlockPrompt = true, SkullPrompt = true, LockPrompt = true,
+		ThingToEnable = true, FusesPrompt = true,
+	}
+	local IsLockPrompt = LockPromptNames[Prompt.Name]
+		or (Prompt.Parent and Prompt.Parent:GetAttribute("Locked") == true)
+		or (Prompt.Parent and Prompt.Parent.Parent
+			and Prompt.Parent.Parent.Name == "Locker_Small_Locked"
+			and Prompt.Name == "ActivateEventPrompt")
+
+	if IsLockPrompt then
+		-- проверка что есть ключ
+		local KeyItems = {
+			"Key", "GeneratorFuse", "KeyBackdoor", "KeyElectrical",
+			"KeyIron", "Lockpick", "SkeletonKey", "Shears", "Multitool",
+		}
+		local OffhandKeyItems = { "Key", "GeneratorFuse", "KeyElectrical", "KeyIron" }
+		local HasKey = false
+		for _, K in ipairs(KeyItems) do
+			if HasItem(K, true) then HasKey = true break end
+		end
+		for _, K in ipairs(OffhandKeyItems) do
+			if HasItem(K) then HasKey = true break end
+		end
+		if not HasKey then return end
+	end
+
+	-- ============ СПЕЦИФИЧНЫЕ ПРОВЕРКИ ============
+	-- Vines/Cellar — нужны ножницы или мультитул
+	if Prompt.Parent.Name == "CuttableVines"
+		and not HasItem("Shears", true)
+		and not HasItem("Multitool", true) then return end
+	if Prompt.Parent.Name == "Chest_Vine"
+		and not HasItem("Shears", true)
+		and not HasItem("Multitool", true) then return end
+	if Prompt.Parent.Name == "Cellar"
+		and not HasItem("Shears", true)
+		and not HasItem("Multitool", true) then return end
+
+	-- SkullLock — нужен SkeletonKey
+	if Prompt.Parent.Name == "SkullLock" and not HasItem("SkeletonKey", true) then return end
+
+	-- Lock1/Lock2 — нужен Lockpick или Multitool
+	if Prompt.Parent.Name == "Lock1"
+		and not HasItem("Lockpick", true)
+		and not HasItem("Multitool", true) then return end
+	if Prompt.Parent.Name == "Lock2"
+		and not HasItem("Lockpick", true)
+		and not HasItem("Multitool", true) then return end
+
+	-- если держим Shears — не используем на замках (кроме vine)
+	if HasItem("Shears", true) and IsLockPrompt
+		and Prompt.Parent.Name ~= "CuttableVines"
+		and Prompt.Parent.Name ~= "Chest_Vine"
+		and Prompt.Parent.Name ~= "Cellar" then return end
+
+	-- ============ ОБЩИЕ ПРОВЕРКИ ============
+	-- уже есть ключ — не подбираем второй
+	if Prompt.Parent.Name == "KeyObtain" and (HasItem("Key") or HasItem("KeyBackdoor")) then return end
+	if Prompt.Parent.Name == "ElectricalKeyObtain" and HasItem("KeyElectrical") then return end
+
+	-- Lever закрытия — не трогаем
+	if Prompt.Parent.Name == "LeverForGate" and Prompt:GetAttribute("Interactions") then return end
+
+	-- фейковые двери — не трогаем
+	if Prompt.Parent.Parent and (Prompt.Parent.Parent.Name == "DoorFake"
+		or Prompt.Parent.Parent.Name == "FakeDoor") then return end
+
+	-- ============ АКТИВИРУЕМ ============
+	FirePrompt(Prompt)
+
+	TriggerDebounce = true
+	task.wait()
+	TriggerDebounce = false
+end
+
+-- ============================================================
+-- ОСНОВНОЙ ЦИКЛ (как в Abysall)
 -- ============================================================
 local function runLoop()
 	local char = player.Character
 	if not char then return end
 
-	local root = char:FindFirstChild("HumanoidRootPart")
-	if not root then return end
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
 
-	local myPos = root.Position
 	local now = tick()
+	if now - aiState.lastFire < 1/60 then return end
 
-	if now - aiState.lastFire < 0.05 then return end
-
-	-- собираем кандидатов в радиусе
-	local candidates = {}
-
+	-- перебираем ВСЕ ProximityPrompt в workspace
 	for _, prompt in ipairs(workspace:GetDescendants()) do
 		if prompt:IsA("ProximityPrompt") and prompt.Enabled then
-			if not isBlacklisted(prompt) then
-				local parent = prompt.Parent
-				if parent then
-					local pos
-					if parent:IsA("BasePart") then
-						pos = parent.Position
-					elseif parent:IsA("Model") then
-						local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
-						pos = pp and pp.Position
-					end
+			-- получаем позицию родителя
+			local parent = prompt.Parent
+			if parent and (parent:IsA("BasePart") or parent:IsA("Model")) then
+				local distance
+				if parent:IsA("BasePart") then
+					distance = player:DistanceFromCharacter(parent.Position)
+				else
+					distance = player:DistanceFromCharacter(parent:GetPivot().Position)
+				end
 
-					if pos then
-						local dist = (pos - myPos).Magnitude
-						if dist <= aiState.distance then
-							table.insert(candidates, { prompt = prompt, dist = dist })
-						end
-					end
+				-- проверяем дистанцию
+				if distance <= prompt.MaxActivationDistance then
+					task.spawn(TriggerPrompt, prompt)
 				end
 			end
 		end
 	end
 
-	-- сортируем по дистанции
-	table.sort(candidates, function(a, b) return a.dist < b.dist end)
-
-	-- активируем ближайший доступный
-	for _, c in ipairs(candidates) do
-		local lastUse = aiState.cooldown[c.prompt] or 0
-		if now - lastUse > 0.5 then
-			aiState.cooldown[c.prompt] = now
-			firePrompt(c.prompt)
-			aiState.lastFire = now
-			return
-		end
-	end
+	aiState.lastFire = now
 end
 
 -- ============================================================
@@ -196,31 +222,28 @@ local function buildUI()
 				end)
 				table.insert(connections, aiState.loop)
 			end
-			print("[AUTO INTERACT] ON (dist=" .. aiState.distance .. ")")
+			print("[AUTO INTERACT] ON")
 		else
 			print("[AUTO INTERACT] OFF")
 		end
 	end)
 
-	Elements.label(page, "DISTANCE (5-30)", 154)
-	local distVal = Elements.label(page, "Distance: 12", 170,
-		{ color = Color3.fromRGB(255, 255, 255), size = 10 })
-
-	Elements.slider(page, 186, 5, 30, 12, function(v)
-		aiState.distance = math.floor(v)
-		distVal.Text = "Distance: " .. aiState.distance
-	end)
-
 	Elements.label(page,
-		"Blacklist: Painting*, Regal*, Wardrobe*, Hide...",
-		206,
-		{ color = Color3.fromRGB(255, 150, 150), size = 9,
+		"Активирует все prompts в радиусе",
+		154,
+		{ color = Color3.fromRGB(150, 255, 150), size = 9,
 		  font = Enum.Font.Gotham })
 
 	Elements.label(page,
-		"Кликает на всё остальное",
-		222,
-		{ color = Color3.fromRGB(150, 255, 150), size = 9,
+		"Blacklist: Hide/Climb/Rift/Donate/Dialogue...",
+		170,
+		{ color = Color3.fromRGB(150, 150, 150), size = 9,
+		  font = Enum.Font.Gotham })
+
+	Elements.label(page,
+		"Проверки: ключи, прочность, lock prompts",
+		186,
+		{ color = Color3.fromRGB(150, 150, 150), size = 9,
 		  font = Enum.Font.Gotham })
 end
 
@@ -242,7 +265,6 @@ function AutoInteract.init(hub)
 
 	function AutoInteract.cleanup()
 		aiState.enabled = false
-		aiState.cooldown = {}
 		if aiState.loop then
 			aiState.loop:Disconnect()
 			aiState.loop = nil
