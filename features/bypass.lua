@@ -1,3 +1,6 @@
+-- ============================================================
+-- ============  MODULE: BYPASS (Obsidian)  ===================
+-- ============================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,13 +11,12 @@ local Bypass = {}
 -- ==================== STATE ====================
 local Config
 local Toggles
+local Options
 local Hub
-local Elements
-local page
+local Tabs
 
 local connections = {}
 
--- state
 local anticheatDisabled = false
 local bypassState = { enabled = false }
 local doorState   = { enabled = false, loop = nil }
@@ -37,7 +39,6 @@ local function setupBypass(char)
 	if not char then return end
 	if not remotes then return end
 
-	-- подписка на атрибут Climbing
 	track(char:GetAttributeChangedSignal("Climbing"):Connect(function()
 		if not bypassState.enabled then return end
 		if char:GetAttribute("Climbing") ~= true then return end
@@ -55,7 +56,6 @@ local function setupBypass(char)
 	end))
 end
 
--- слушаем события, которые сбрасывают флаг anticheatDisabled
 local function watchResetEvents()
 	if not remotes then return end
 
@@ -116,25 +116,27 @@ local function stopDoorLoop()
 end
 
 ------------------------------------------------------------
--- UI (page 3)
+-- UI (Obsidian Groupbox)
 ------------------------------------------------------------
 local function buildUI()
-	page = Hub.Page(3)
-	if not page then
-		warn("[bypass] page 3 не найдена")
+	local ExploitsTab = Tabs.Exploits
+	if not ExploitsTab then
+		warn("[bypass] нет таба Exploits")
 		return
 	end
 
+	local group = ExploitsTab:AddLeftGroupbox("Bypass")
+
 	-- ============ ANTICHEAT BYPASS ============
-	Elements.label(page, "ANTICHEAT BYPASS", 2)
+	group:AddToggle("BypassAnticheat", {
+		Text = "Anticheat Bypass",
+		Default = false,
+		Tooltip = "Климб на лестнице — отключит античит",
+	})
 
-	local bypHint = Elements.label(page, "Климб лестницу", 18,
-		{ color = Color3.fromRGB(180, 180, 180), size = 9,
-		  font = Enum.Font.Gotham })
-
-	Hub.Toggles.bypass = Elements.switch(page, 0, function(on)
-		bypassState.enabled = on
-		if on then
+	Toggles.BypassAnticheat:OnChanged(function(Value)
+		bypassState.enabled = Value
+		if Value then
 			if player.Character then setupBypass(player.Character) end
 			print("[BYPASS] Enabled — climb a ladder")
 		else
@@ -143,11 +145,33 @@ local function buildUI()
 		end
 	end)
 
+	group:AddLabel("Климб лестницу"):AddColorPicker("BypassHintColor", {
+		Default = Color3.fromRGB(180, 180, 180),
+	})
+
 	-- ============ DOOR REACH ============
-	Elements.label(page, "DOOR REACH", 34)
-	Hub.Toggles.doorReach = Elements.switch(page, 32, function(on)
-		doorState.enabled = on
-		if on then startDoorLoop() else stopDoorLoop() end
+	group:AddDivider()
+
+	group:AddToggle("DoorReach", {
+		Text = "Door Reach",
+		Default = false,
+		Tooltip = "Авто-открытие дверей в радиусе 75 студов",
+	})
+
+	Toggles.DoorReach:OnChanged(function(Value)
+		doorState.enabled = Value
+		if Value then startDoorLoop() else stopDoorLoop() end
+	end)
+
+	group:AddSlider("DoorReachRange", {
+		Text = "Дальность",
+		Min = 20, Max = 200, Default = 75,
+		Rounding = 0,
+		Compact = true,
+	})
+
+	Options.DoorReachRange:OnChanged(function(Value)
+		-- можно использовать для изменения радиуса (опционально)
 	end)
 end
 
@@ -158,20 +182,17 @@ function Bypass.init(hub)
 	Hub = hub
 	Config = hub.Config
 	Toggles = hub.Toggles
-	Elements = hub.Elements or (hub.Objects and hub.Objects.Elements)
+	Options = hub.Options
+	Tabs = hub.Tabs
 
-	if not Elements then
-		warn("[bypass] Elements не найдены — ui.lua должен грузиться первым")
+	if not Tabs then
+		warn("[bypass] Tabs не найдены — Obsidian UI не загружен")
 		return
 	end
 
-	-- UI
 	buildUI()
-
-	-- следим за событиями сброса
 	watchResetEvents()
 
-	-- подписка на респавн
 	track(player.CharacterAdded:Connect(function(char)
 		task.wait(1)
 		if bypassState.enabled then
@@ -179,7 +200,6 @@ function Bypass.init(hub)
 		end
 	end))
 
-	-- ============ CLEANUP ============
 	function Bypass.cleanup()
 		bypassState.enabled = false
 		doorState.enabled = false
@@ -193,7 +213,7 @@ function Bypass.init(hub)
 		connections = {}
 	end
 
-	print("[BYPASS] Модуль инициализирован")
+	print("[BYPASS] Модуль инициализирован (Obsidian)")
 	return Bypass
 end
 
