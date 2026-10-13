@@ -398,6 +398,7 @@ function UI.init(Hub)
 		"features/notify.lua",
 		"features/misc.lua",
 		"features/jump.lua",
+		"features/antiafk.lua",
 		"features/save.lua",
 	}
 
