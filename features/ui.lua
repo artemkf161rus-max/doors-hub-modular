@@ -397,6 +397,7 @@ function UI.init(Hub)
 		"features/bypass.lua",
 		"features/notify.lua",
 		"features/misc.lua",
+		"features/jump.lua",
 		"features/save.lua",
 	}
 
