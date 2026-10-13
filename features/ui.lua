@@ -1,5 +1,5 @@
 -- ============================================================
--- ============  MODULE: UI (COMPACT, 4 pages)  ===============
+-- ============  MODULE: UI (PC Only, Hotkeys)  ===============
 -- ============================================================
 local UI = {}
 
@@ -51,42 +51,6 @@ function UI.init(Hub)
 		s.Thickness = thickness or 1
 		s.Parent = parent
 		return s
-	end
-
-	local function makeDraggable(frame, dragTarget)
-		local dragging, dragStart, startPos, dragInput
-		local target = dragTarget or frame
-		target.InputBegan:Connect(function(input)
-			if isLocked then return end
-			if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-				dragging = true
-				dragStart = input.Position
-				startPos = frame.Position
-				input.Changed:Connect(function()
-					if input.UserInputState == Enum.UserInputState.End then
-						dragging = false
-					end
-				end)
-			end
-		end)
-		target.InputChanged:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch then
-				dragInput = input
-			end
-		end)
-		UserInputService.InputChanged:Connect(function(input)
-			if not dragging then return end
-			if isLocked then dragging = false return end
-			if input == dragInput then
-				local delta = input.Position - dragStart
-				frame.Position = UDim2.new(
-					startPos.X.Scale, startPos.X.Offset + delta.X,
-					startPos.Y.Scale, startPos.Y.Offset + delta.Y
-				)
-			end
-		end)
 	end
 
 	-- ============================================================
@@ -243,30 +207,12 @@ function UI.init(Hub)
 	end
 
 	-- ============================================================
-	-- BUTTON HOLDER
-	-- ============================================================
-	local holder = Instance.new("Frame")
-	holder.Size = UDim2.new(0, 260, 0, 32)
-	holder.Position = UDim2.new(0, 15, 0, 15)
-	holder.BackgroundTransparency = 1
-	holder.Active = true
-	holder.Parent = gui
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.Padding = UDim.new(0, 6)
-	layout.Parent = holder
-
-	local toggleBtn = Elements.button(holder, "Toggle", 1, Color3.fromRGB(75, 0, 130), 70)
-	local lockBtn   = Elements.button(holder, "Lock", 2, Color3.fromRGB(75, 0, 130), 70)
-	local unloadBtn = Elements.button(holder, "Unload", 3, COLORS.Danger, 80)
-
-	-- ============================================================
-	-- MENU
+	-- MENU (без holder с кнопками)
 	-- ============================================================
 	local menu = Instance.new("Frame")
 	menu.Size = UDim2.new(0, 250, 0, 260)
 	menu.Position = UDim2.new(0, 15, 0, 60)
-	menu.BackgroundColor3 = COLORS.Background
+	menu.BackgroundColor3 = COLORS.BACKGROUND or COLORS.Background
 	menu.BorderSizePixel = 0
 	menu.Visible = false
 	menu.Active = true
@@ -275,7 +221,7 @@ function UI.init(Hub)
 	stroke(menu, COLORS.Accent, 1)
 
 	-- ============================================================
-	-- PAGES — 4 страницы
+	-- PAGES
 	-- ============================================================
 	local pages = {}
 	local pagesCount = 4
@@ -351,28 +297,67 @@ function UI.init(Hub)
 	Hub.MenuFrame = menu
 	Hub.Pages = pages
 
-	-- DRAG
-	makeDraggable(holder, toggleBtn)
-	makeDraggable(holder, lockBtn)
-	makeDraggable(holder, unloadBtn)
-	makeDraggable(menu, menu)
-
+	-- ============================================================
+	-- ОТКРЫТИЕ / ЗАКРЫТИЕ МЕНЮ + КУРСОР
+	-- ============================================================
 	local open = false
-	toggleBtn.MouseButton1Click:Connect(function()
+
+	local function setCursorVisible(visible)
+		pcall(function()
+			UserInputService.MouseIconEnabled = visible
+		end)
+		pcall(function()
+			UserInputService.MouseBehavior = visible
+				and Enum.MouseBehavior.Default
+				or Enum.MouseBehavior.LockCenter
+		end)
+	end
+
+	local function toggleMenu()
 		open = not open
 		menu.Visible = open
-		if open then
-			menu.Position = UDim2.new(
-				holder.Position.X.Scale, holder.Position.X.Offset,
-				holder.Position.Y.Scale, holder.Position.Y.Offset + 40
-			)
-		end
-	end)
 
-	lockBtn.MouseButton1Click:Connect(function()
-		isLocked = not isLocked
-		lockBtn.Text = isLocked and "Lock" or "Unlk"
-		lockBtn.BackgroundColor3 = isLocked and Color3.fromRGB(75, 0, 130) or Color3.fromRGB(120, 0, 200)
+		if open then
+			-- центрируем меню на экране
+			menu.Position = UDim2.new(0.5, -125, 0.5, -130)
+			setCursorVisible(true)
+		else
+			setCursorVisible(false)
+		end
+	end
+
+	-- ============================================================
+	-- KEYBINDS
+	-- ============================================================
+	UserInputService.InputBegan:Connect(function(input, gpe)
+		if gpe then return end
+
+		-- RightShift — открыть/закрыть меню
+		if input.KeyCode == Enum.KeyCode.RightShift then
+			toggleMenu()
+		end
+
+		-- F6 — выгрузить чит
+		if input.KeyCode == Enum.KeyCode.F6 then
+			if Hub.Modules.save and Hub.Modules.save.cleanup then
+				pcall(Hub.Modules.save.cleanup)
+			end
+			for name, mod in pairs(Hub.Modules) do
+				if name ~= "save" and type(mod) == "table" and mod.cleanup then
+					pcall(mod.cleanup)
+				end
+			end
+			for _, sw in pairs(Hub.Toggles) do
+				pcall(function() sw.set(false) end)
+			end
+			for _, c in pairs(Hub.Connections) do
+				pcall(function() c:Disconnect() end)
+			end
+			Hub.Connections = {}
+			if gui and gui.Parent then gui:Destroy() end
+			setCursorVisible(true)
+			print("[HUB] Unloaded by F6")
+		end
 	end)
 
 	-- ============================================================
@@ -425,27 +410,10 @@ function UI.init(Hub)
 	print("[UI] =========================================")
 
 	-- ============================================================
-	-- UNLOAD
+	-- СТАРТ: КУРСОР ЗАБЛОКИРОВАН
 	-- ============================================================
-	unloadBtn.MouseButton1Click:Connect(function()
-		if Hub.Modules.save and Hub.Modules.save.cleanup then
-			pcall(Hub.Modules.save.cleanup)
-		end
-		for name, mod in pairs(Hub.Modules) do
-			if name ~= "save" and type(mod) == "table" and mod.cleanup then
-				pcall(mod.cleanup)
-			end
-		end
-		for _, sw in pairs(Hub.Toggles) do
-			pcall(function() sw.set(false) end)
-		end
-		for _, c in pairs(Hub.Connections) do
-			pcall(function() c:Disconnect() end)
-		end
-		Hub.Connections = {}
-		if gui and gui.Parent then gui:Destroy() end
-		print("[HUB] Unloaded")
-	end)
+	setCursorVisible(false)
+	print("[UI] PC mode — RightShift=Menu/Cursor, F6=Unload")
 
 	return Hub
 end
