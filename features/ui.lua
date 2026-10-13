@@ -1,5 +1,5 @@
 -- ============================================================
--- ============  MODULE: UI (PC Only, Hotkeys)  ===============
+-- ============  MODULE: UI (PC + Mobile)  ====================
 -- ============================================================
 local UI = {}
 
@@ -7,6 +7,7 @@ function UI.init(Hub)
 	local Players = game:GetService("Players")
 	local TweenService = game:GetService("TweenService")
 	local UserInputService = game:GetService("UserInputService")
+	local VirtualInputManager = game:GetService("VirtualInputManager")
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui")
 
@@ -207,12 +208,12 @@ function UI.init(Hub)
 	end
 
 	-- ============================================================
-	-- MENU (без holder с кнопками)
+	-- MENU
 	-- ============================================================
 	local menu = Instance.new("Frame")
 	menu.Size = UDim2.new(0, 250, 0, 260)
-	menu.Position = UDim2.new(0, 15, 0, 60)
-	menu.BackgroundColor3 = COLORS.BACKGROUND or COLORS.Background
+	menu.Position = UDim2.new(0.5, -125, 0.5, -130)
+	menu.BackgroundColor3 = COLORS.Background
 	menu.BorderSizePixel = 0
 	menu.Visible = false
 	menu.Active = true
@@ -298,10 +299,8 @@ function UI.init(Hub)
 	Hub.Pages = pages
 
 	-- ============================================================
-	-- ОТКРЫТИЕ / ЗАКРЫТИЕ МЕНЮ + КУРСОР
+	-- КУРСОР
 	-- ============================================================
-	local open = false
-
 	local function setCursorVisible(visible)
 		pcall(function()
 			UserInputService.MouseIconEnabled = visible
@@ -311,19 +310,57 @@ function UI.init(Hub)
 				and Enum.MouseBehavior.Default
 				or Enum.MouseBehavior.LockCenter
 		end)
+		-- хак: эмулируем открытие чата для разблокировки курсора
+		if visible then
+			pcall(function()
+				VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Slash, false, game)
+				task.wait(0.05)
+				VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Slash, false, game)
+			end)
+		end
 	end
 
+	-- ============================================================
+	-- ОТКРЫТИЕ / ЗАКРЫТИЕ
+	-- ============================================================
+	local open = false
 	local function toggleMenu()
 		open = not open
 		menu.Visible = open
 
 		if open then
-			-- центрируем меню на экране
 			menu.Position = UDim2.new(0.5, -125, 0.5, -130)
 			setCursorVisible(true)
 		else
 			setCursorVisible(false)
 		end
+	end
+
+	-- ============================================================
+	-- ВЫГРУЗКА
+	-- ============================================================
+	local function unloadHub()
+		if Hub.Modules.save and Hub.Modules.save.cleanup then
+			pcall(Hub.Modules.save.cleanup)
+		end
+		for name, mod in pairs(Hub.Modules) do
+			if name ~= "save" and type(mod) == "table" and mod.cleanup then
+				pcall(mod.cleanup)
+			end
+		end
+		for _, sw in pairs(Hub.Toggles) do
+			pcall(function() sw.set(false) end)
+		end
+		for _, c in pairs(Hub.Connections) do
+			pcall(function() c:Disconnect() end)
+		end
+		Hub.Connections = {}
+		if gui and gui.Parent then gui:Destroy() end
+		pcall(function()
+			UserInputService.MouseIconEnabled = true
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		end)
+		print("[HUB] Unloaded")
 	end
 
 	-- ============================================================
@@ -337,26 +374,9 @@ function UI.init(Hub)
 			toggleMenu()
 		end
 
-		-- F6 — выгрузить чит
+		-- F6 — выгрузить
 		if input.KeyCode == Enum.KeyCode.F6 then
-			if Hub.Modules.save and Hub.Modules.save.cleanup then
-				pcall(Hub.Modules.save.cleanup)
-			end
-			for name, mod in pairs(Hub.Modules) do
-				if name ~= "save" and type(mod) == "table" and mod.cleanup then
-					pcall(mod.cleanup)
-				end
-			end
-			for _, sw in pairs(Hub.Toggles) do
-				pcall(function() sw.set(false) end)
-			end
-			for _, c in pairs(Hub.Connections) do
-				pcall(function() c:Disconnect() end)
-			end
-			Hub.Connections = {}
-			if gui and gui.Parent then gui:Destroy() end
-			setCursorVisible(true)
-			print("[HUB] Unloaded by F6")
+			unloadHub()
 		end
 	end)
 
@@ -412,8 +432,12 @@ function UI.init(Hub)
 	-- ============================================================
 	-- СТАРТ: КУРСОР ЗАБЛОКИРОВАН
 	-- ============================================================
-	setCursorVisible(false)
-	print("[UI] PC mode — RightShift=Menu/Cursor, F6=Unload")
+	pcall(function()
+		UserInputService.MouseIconEnabled = false
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	end)
+
+	print("[UI] Загружен. RightShift=Menu, F6=Unload")
 
 	return Hub
 end
