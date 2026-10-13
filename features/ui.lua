@@ -1,5 +1,5 @@
 -- ============================================================
--- ============  MODULE: UI (COMPACT)  ========================
+-- ============  MODULE: UI (COMPACT, 4 pages)  ===============
 -- ============================================================
 local UI = {}
 
@@ -275,10 +275,10 @@ function UI.init(Hub)
 	stroke(menu, COLORS.Accent, 1)
 
 	-- ============================================================
-	-- PAGES
+	-- PAGES — 4 страницы
 	-- ============================================================
 	local pages = {}
-	local pagesCount = 3
+	local pagesCount = 4
 	for i = 1, pagesCount do
 		local p = Instance.new("Frame")
 		p.Name = "Page" .. i
